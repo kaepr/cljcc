@@ -1,27 +1,7 @@
 (ns cljcc.cljcc
   (:require
-   [instaparse.core :as insta]
-   [clojure.java.io :as io])
+   [cljcc.driver :as d])
   (:gen-class))
-
-(def ex-prg "int main(void) {return 2;}")
-
-(def whitespace
-  (insta/parser
-   "whitespace = #'\\s+'"))
-
-(def c-parser
-  (insta/parser
-   "<program> = function+
-    function = #'int\\b' identifier <'('> #'void\\b' <')'> <'{'> statement <'}'>
-    statement = #'return\\b' exp <';'>
-    exp = constant
-    identifier = #'[a-zA-Z_]\\w*\\b'
-    constant = #'[0-9]+\\b'
-    keyword = #'int\\b' | #'return\\b' | #'void\\b'"
-   :auto-whitespace whitespace))
-
-(println (c-parser ex-prg))
 
 (defn greet
   "Callable entry point to the application."
@@ -31,5 +11,12 @@
 (defn -main
   "I don't do a whole lot ... yet."
   [& args]
-  (let [input-file-path (first args)])
-  (greet {:name (first args)}))
+  (let [input-file-path (first args)]
+    (try
+     (d/run input-file-path)
+     (println "success")
+     (catch Exception e
+       (println "Error: " (.getMessage e))
+       (System/exit 1))
+     (finally
+       (System/exit 0)))))
