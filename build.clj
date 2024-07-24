@@ -3,7 +3,6 @@
   (:require [clojure.tools.build.api :as b]))
 
 (def lib 'net.clojars.cljcc/cljcc)
-(def version "0.1.0-SNAPSHOT")
 (def main 'cljcc.cljcc)
 (def class-dir "target/classes")
 
