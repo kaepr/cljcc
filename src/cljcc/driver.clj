@@ -19,7 +19,7 @@
              (println "running on mac"))
       :unsupported (throw (Exception. (str os " is not currently supported."))))))
 
-(defn remove-extension [filename]
+(defn remove-extension [^String filename]
   (if (.contains filename ".")
     (.substring filename 0 (.lastIndexOf filename "."))
     filename))
@@ -29,7 +29,7 @@
         preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
         output (handle-sh "gcc" "-E" "-P" input-file-path "-o" preprocessed-file-path)]
     (if (= 1 (:exit output))
-      (throw (Exception. (:out output)))
+      (throw (Exception. ^String (:out output)))
       (println (str "Successfully preprocessed file: " preprocessed-file-path)))))
 
 (defn assemble [directory filename]
@@ -39,7 +39,7 @@
         output (handle-sh "gcc" assembly-file "-o" output-file)]
     (println file-without-ext assembly-file output-file output)
     (if (= 1 (:exit output))
-      (throw (Exception. (:out output)))
+      (throw (Exception. ^String (:out output)))
       (println (str "Successfully created executable at: " output-file output)))))
 
 (defn run-compile [directory filename]
@@ -58,8 +58,9 @@
 
 (defn run
   "Runs the compiler driver with the given input source file."
-  [file-path]
-  (let [file (io/file file-path)
+  [^String file-path]
+  (let [file (io/file ^String file-path)
+        _ (println file)
         filename (.getName file)
         directory (.getParent file)]
     (handle-os)

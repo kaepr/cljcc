@@ -3,6 +3,8 @@
    [cljcc.driver :as d])
   (:gen-class))
 
+(set! *warn-on-reflection* true)
+
 (defn greet
   "Callable entry point to the application."
   [data]
