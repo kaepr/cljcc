@@ -2,7 +2,8 @@
   (:require [clojure.java.shell :refer [sh]]
             [clojure.java.io :as io]
             [cljcc.compiler :as c]
-            [cljcc.util :refer [get-os handle-sh mac-aarch64?]]))
+            [cljcc.util :refer [get-os handle-sh mac-aarch64?]]
+            [cljcc.parser :as p]))
 
 (defn make-file-name
   ([filename ext]
@@ -46,6 +47,9 @@
   (let [preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
         file (io/file preprocessed-file-path)
         source (slurp file)
+        _ (if (p/parseable? (p/parse source))
+            (println "Parsing successfull.")
+            (throw (Exception. "Failed during parsing")))
         assembled-source (c/run-compile source)
         out-file-path (make-file-name directory (remove-extension filename) "s")]
     (spit out-file-path assembled-source)
@@ -53,26 +57,31 @@
 
 (defn cleanup [directory filename]
   (let [file-without-ext (remove-extension filename)]
-    (sh "rm" (make-file-name directory file-without-ext "i"))
-    (sh "rm" (make-file-name directory file-without-ext "s"))))
+    (io/delete-file (make-file-name directory file-without-ext "i") true)
+    (io/delete-file (make-file-name directory file-without-ext "s") true)))
 
 (defn run
   "Runs the compiler driver with the given input source file."
   [^String file-path]
   (let [file (io/file ^String file-path)
-        _ (println file)
         filename (.getName file)
         directory (.getParent file)]
-    (handle-os)
-    (preprocess directory filename)
-    (run-compile directory filename)
-    (assemble directory filename)
-    (cleanup directory filename)
-    (println "Successfully created executable at " directory " for filename " filename)))
+    (try
+      (handle-os)
+      (preprocess directory filename)
+      (run-compile directory filename)
+      (assemble directory filename)
+      (println "Successfully created executable at " directory " for filename " filename)
+      (catch Exception e
+        (println "Caught exception: " (.getMessage e))
+        (cleanup directory filename)
+        (throw (Exception. "Failed to run compiler.")))
+      (finally
+        (cleanup directory filename)))))
 
 (comment
 
- (run "/Users/shagunagrawal/Development/c_tests/ex2.c")
+ (run "/Users/shagunagrawal/Development/c_tests/ex3.c")
 
  (assemble "/Users/shagunagrawal/Development/c_tests" "ex2.c")
 

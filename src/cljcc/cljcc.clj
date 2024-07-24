@@ -11,7 +11,6 @@
   (let [input-file-path (first args)]
     (try
      (d/run input-file-path)
-     (println "success")
      (catch Exception e
        (println "Error: " (.getMessage e))
        (System/exit 1))

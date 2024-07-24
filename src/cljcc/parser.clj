@@ -17,6 +17,9 @@
     keyword = #'int\\b' | #'return\\b' | #'void\\b'"
    :auto-whitespace whitespace))
 
+(defn parseable? [result]
+  (not (insta/failure? result)))
+
 (defn parse [source]
   (c-parser source))
 
