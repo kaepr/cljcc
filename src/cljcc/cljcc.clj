@@ -5,13 +5,8 @@
 
 (set! *warn-on-reflection* true)
 
-(defn greet
-  "Callable entry point to the application."
-  [data]
-  (println (str "Hello, " (or (:name data) "World") "!")))
-
 (defn -main
-  "I don't do a whole lot ... yet."
+  "Main entrypoint for cljcc compiler."
   [& args]
   (let [input-file-path (first args)]
     (try

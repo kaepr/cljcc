@@ -4,9 +4,6 @@
         com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}}
  :aliases
  {:run-m {:main-opts ["-m" "cljcc.cljcc"]}
-  :run-x {:ns-default cljcc.cljcc
-          :exec-fn greet
-          :exec-args {:name "Clojure"}}
   :build {:deps {io.github.clojure/tools.build
                  {:mvn/version "0.10.3"}}
           :ns-default build}

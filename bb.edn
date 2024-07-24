@@ -1,0 +1,36 @@
+{:tasks
+ {:requires ([babashka.fs :as fs]
+             [clojure.string :as str])
+  :init (let [windows? (str/starts-with? (System/getProperty "os.name") "Windows")]
+          (if windows?
+            (do
+              (println "Cannot run on Windows !")
+              (System/exit 1))))
+  clean (do
+          (println "Removing target folder.")
+          (fs/delete-tree "target"))
+
+  run-main {:doc "Run main"
+            :task (apply clojure "-M -m cljcc.cljcc" *command-line-args*)}
+  build-uberjar {:doc "Builds uberjar"
+                 :task (when (seq (fs/modified-since "target/cljcc"
+                                                     ["src" "build.clj" "deps.edn" "test" "resources"]))
+                        (clojure "-T:build ci"))}
+  run-uberjar {:doc "Run uberjar"
+               :depends [build-uberjar]
+               :task (apply shell "java -jar target/cljcc/cljcc.jar" *command-line-args*)}
+  build-native {:doc "Builds native image"
+                :depends [build-uberjar]
+                :task
+                    (shell {:dir "target/cljcc"}
+                           "native-image"
+                           "-jar" "cljcc.jar"
+                           "-o" "cljcc"
+                           "-Ob" ; quick compilation flag for development
+                           ; "-H:Name=cljcc"
+                           "-H:+ReportExceptionStackTraces"
+                           "--features=clj_easy.graal_build_time.InitClojureClasses"
+                           "--initialize-at-build-time"
+                           "--report-unsupported-elements-at-runtime"
+                           "--verbose"
+                           "--no-fallback")}}}
