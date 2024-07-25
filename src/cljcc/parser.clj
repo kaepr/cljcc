@@ -11,7 +11,8 @@
    "<program> = function+
     function = #'int\\b' identifier <'('> #'void\\b' <')'> <'{'> statement <'}'>
     statement = #'return\\b' exp <';'>
-    exp = constant
+    exp = constant | unop exp | <'('> exp <')'>
+    unop = #'-\\b' | #'~\\b'
     identifier = #'[a-zA-Z_]\\w*\\b'
     constant = #'[0-9]+\\b'
     keyword = #'int\\b' | #'return\\b' | #'void\\b'"

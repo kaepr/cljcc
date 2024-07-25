@@ -1,5 +1,6 @@
 (ns cljcc.util
-  (:require [clojure.java.shell :refer [sh]]))
+  (:require [clojure.java.shell :refer [sh]]
+            [cljcc.log :as log]))
 
 (defn get-os []
   (let [os-name (.toLowerCase (System/getProperty "os.name"))]
@@ -17,3 +18,9 @@
   (if (mac-aarch64?)
     (apply sh "arch" "-x86_64" command args)
     (apply sh command args)))
+
+(defn exit [status msg]
+  (if (= status 0)
+    (log/info msg)
+    (log/error msg))
+  (System/exit status))

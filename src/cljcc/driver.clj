@@ -62,7 +62,7 @@
 
 (defn run
   "Runs the compiler driver with the given input source file."
-  [^String file-path]
+  [^String file-path options]
   (let [file (io/file ^String file-path)
         filename (.getName file)
         directory (.getParent file)]
