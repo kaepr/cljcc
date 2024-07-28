@@ -2,7 +2,6 @@
   (:require
    [clojure.tools.cli :refer [parse-opts]]
    [clojure.string :as string]
-   [cljcc.log :as log]
    [cljcc.util :refer [exit]]
    [cljcc.driver :as d])
   (:gen-class))
@@ -37,6 +36,7 @@
     (if exit-message
       (exit (if ok? 0 1) exit-message)
       (try
-       (d/run file-path options)
-       (catch Exception e (exit 1 (.getMessage e)))
-       (finally (exit 0 "Succesfully ran compiler."))))))
+        (d/run file-path options)
+        (exit 0 "Successfully executed.")
+        (catch Exception e
+          (exit 1 (ex-message e)))))))

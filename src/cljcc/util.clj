@@ -2,6 +2,12 @@
   (:require [clojure.java.shell :refer [sh]]
             [cljcc.log :as log]))
 
+(defn make-file-name
+  ([^String filename ^String ext]
+   (str filename "." ext))
+  ([directory filename ext]
+   (str directory "/" filename "." ext)))
+
 (defn get-os []
   (let [os-name (.toLowerCase (System/getProperty "os.name"))]
     (cond
@@ -10,7 +16,7 @@
       :else :unsupported)))
 
 (defn mac-aarch64? []
-  (and (= :mac (get-os)) (= (System/getProperty "os.arch" "aarch64"))))
+  (and (= :mac (get-os)) (= (System/getProperty "os.arch") "aarch64")))
 
 (defn handle-sh
   "Preprends arch -x86_64 if running under Mac M chips."
