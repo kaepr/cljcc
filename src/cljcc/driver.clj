@@ -91,6 +91,6 @@
 
 (comment
 
- (run "/Users/shagunagrawal/Development/c_tests/ex3.c" {})
+ (run "./test-programs/ex1.c" {})
 
  ,)

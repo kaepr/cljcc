@@ -54,8 +54,10 @@
 (defn il->assembly [il]
   (let [fn-assembly (emit-function-assembly (first il))]
     (if (= :linux (get-os))
-      (conj fn-assembly linux-assembly-end)
+      (concat fn-assembly [linux-assembly-end])
       fn-assembly)))
+
+(conj [1 2 3] 1)
 
 (defn join-assembly [assembly-lines]
   (str/join "\n" assembly-lines))

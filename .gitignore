@@ -23,6 +23,7 @@
 *.jar
 *.swp
 *~
+/test-programs
 /checkouts
 /classes
 /target
