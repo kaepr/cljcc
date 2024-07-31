@@ -12,7 +12,7 @@
     function = #'int\\b' identifier <'('> #'void\\b' <')'> <'{'> statement <'}'>
     statement = #'return\\b' exp <';'>
     exp = constant | unop exp | <'('> exp <')'>
-    unop = #'-\\b' | #'~\\b'
+    unop = #'-' | #'~'
     identifier = #'[a-zA-Z_]\\w*\\b'
     constant = #'[0-9]+\\b'
     keyword = #'int\\b' | #'return\\b' | #'void\\b'"
@@ -26,4 +26,9 @@
 
 (comment
  (parse "int main(void) {return 2;}")
+
+ (parse "int main(void) {
+return -(((((10)))));
+}")
+
  ,)
