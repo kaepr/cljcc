@@ -12,17 +12,17 @@
    :body body})
 
 (defn ast->compile [ast]
- (insta/transform
-  {:function transform-function
-   :identifier str
-   :constant (comp edn/read-string str)
-   :exp (fn [v]
-          {:op :movl
-           :src v
-           :dst :eax})
+  (insta/transform
+   {:function transform-function
+    :identifier str
+    :constant (comp edn/read-string str)
+    :exp (fn [v]
+           {:op :movl
+            :src v
+            :dst :eax})
     :statement (fn [_ v]
                  [v {:op :ret}])}
-  ast))
+   ast))
 
 (defn handle-function-name [name]
   (if (= :mac (get-os))
@@ -37,8 +37,8 @@
 
 (defn statement-fn [stmt]
   (condp = (:op stmt)
-        :ret (emit-instruction :ret)
-        :movl (emit-instruction (:op stmt) (:src stmt) (:dst stmt))))
+    :ret (emit-instruction :ret)
+    :movl (emit-instruction (:op stmt) (:src stmt) (:dst stmt))))
 
 (statement-fn {:op :movl :src 1 :dst :eax})
 
@@ -71,19 +71,17 @@
 
 (comment
 
- (def ex "int main(void) {return 2;}")
+  (def ex "int main(void) {return 2;}")
 
- (-> ex
+  (-> ex
       p/parse)
 
- (-> ex
+  (-> ex
       p/parse
       ast->compile)
 
- (-> ex
-   p/parse
-   ast->compile
-   il->assembly
-   join-assembly)
-
- ,)
+  (-> ex
+      p/parse
+      ast->compile
+      il->assembly
+      join-assembly))

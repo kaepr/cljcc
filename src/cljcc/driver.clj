@@ -1,10 +1,12 @@
 (ns cljcc.driver
   (:require
-        [clojure.java.io :as io]
-        [cljcc.compiler :as c]
-        [cljcc.log :as log]
-        [cljcc.util :refer [get-os handle-sh mac-aarch64? make-file-name]]
-        [cljcc.parser :as p]))
+   [clojure.java.io :as io]
+   [cljcc.compiler :as c]
+   [cljcc.tacky :as t]
+   [clojure.pprint :as pp]
+   [cljcc.log :as log]
+   [cljcc.util :refer [get-os handle-sh mac-aarch64? make-file-name]]
+   [cljcc.parser :as p]))
 
 (defn validate-os []
   (let [os (get-os)]
@@ -45,6 +47,15 @@
       (log/info "Input file is succesfully parsed.")
       (throw (Exception. "Failed during parsing")))))
 
+(defn tacky-step [directory filename]
+  (let [preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
+        file (io/file preprocessed-file-path)
+        source (slurp file)
+        output (t/tacky-generate (p/parse source))]
+    (log/info (str
+               "Successfully generated Tacky IR.\n"
+               (with-out-str (pp/pprint output))))))
+
 (defn compiler-step [directory filename]
   (let [preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
         file (io/file preprocessed-file-path)
@@ -65,14 +76,13 @@
         parser-step-fn (partial parser-step directory filename)
         compiler-step-fn (partial compiler-step directory filename)
         assemble-step-fn (partial assemble-step directory filename)
-        cleanup-step-fn (partial cleanup-step directory filename)]
+        tacky-step-fn (partial tacky-step directory filename)]
     (cond
-      (:parse options) (concat base-steps
-                               [parser-step-fn cleanup-step-fn])
-      (:codegen options) (concat base-steps
-                                 [parser-step-fn compiler-step-fn cleanup-step-fn])
+      (:parse options) (concat base-steps [parser-step-fn])
+      (:tacky options) (concat base-steps [parser-step-fn tacky-step-fn])
+      (:codegen options) (concat base-steps [parser-step-fn tacky-step-fn compiler-step-fn])
       :else (concat base-steps
-                    [parser-step-fn compiler-step-fn assemble-step-fn cleanup-step-fn]))))
+                    [parser-step-fn tacky-step-fn compiler-step-fn assemble-step-fn]))))
 
 (defn run-steps [options directory filename]
   (let [steps (create-steps options directory filename)]
@@ -91,6 +101,4 @@
 
 (comment
 
- (run "./test-programs/ex1.c" {})
-
- ,)
+  (run "./test-programs/ex1.c" {}))

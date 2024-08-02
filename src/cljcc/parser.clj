@@ -11,10 +11,11 @@
 (def c-parser
   (insta/parser
    "<program> = function+
-    function = #'int\\b' identifier <'('> #'void\\b' <')'> <'{'> statement+ <'}'>
+    function = #'int\\b' identifier <'('> #'void\\b' <')'> <'{'> statement <'}'>
     statement = #'return\\b' exp <';'>
     exp = exp-prime
-    <exp-prime> = constant | unop exp-prime | <'('> exp-prime <')'>
+    <exp-prime> = constant | unop-exp | <'('> exp-prime <')'>
+    unop-exp = unop exp
     unop = #'-' | #'~'
     identifier = #'[a-zA-Z_]\\w*\\b'
     constant = #'[0-9]+\\b'
@@ -29,21 +30,17 @@
 
 (comment
 
- (parse "int main(void) {return 2;}")
+  (parse "int main(void) {return 2;}")
 
- (parse "
+  (parse "
   int main(void) {
-  return 2;
   return 2;
   }")
 
- (parse "int main(void) {
+  (parse "int main(void) {
    return -(((((10)))));
    }")
 
- (parse "int main(void) {
-   return --2;
+  (parse "int main(void) {
    return -(((((10)))));
-   }")
-
- ,)
+   }"))

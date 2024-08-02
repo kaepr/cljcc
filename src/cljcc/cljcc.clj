@@ -19,6 +19,7 @@
 (def cli-options
   [[nil "--parse" "Runs parser. Does not emit any files."]
    [nil "--codegen" "Runs compiler. Does not emit any files."]
+   [nil "--tacky" "Runs tacky generation. Does not emit any files."]
    ["-h" "--help"]])
 
 (defn validate-args [args]
