@@ -61,9 +61,10 @@
     (conj instructions (return-instruction val))))
 
 (defn statement-transform [_ret-keyword exp]
-  (reverse (ret-instructions exp)))
+  {:instructions (reverse (ret-instructions exp))})
 
 (defn tacky-generate [ast]
+  (reset! counter 0)
   (insta/transform {:statement statement-transform} ast))
 
 (comment
@@ -106,13 +107,11 @@
   (pp/pprint
    (ret-instructions ex-ret))
 
- (def exprg
-   "int main(void) {
+  (def exprg
+    "int main(void) {
      return -(~(-8));
    }")
 
- (pp/pprint (parse "int main(void) {return 2;}"))
+  (pp/pprint (parse "int main(void) {return 2;}"))
 
- (pp/pprint (parse exprg))
-
- ,)
+  (pp/pprint (parse exprg)))
