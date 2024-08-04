@@ -2,30 +2,7 @@
   (:require [cljcc.parser :as p]
             [instaparse.core :as insta]
             [clojure.pprint :as pp]
-            [clojure.edn :as edn]
-            [cljcc.util :refer [get-os]]
-            [clojure.string :as str]
-            [cljcc.tacky :as t]
-            [cljcc.log :as log]))
-
-(defn transform-function [return-type identifier args body]
-  {:op :function
-   :identifier identifier
-   :args args
-   :body body})
-
-(defn ast->compile [ast]
-  (insta/transform
-   {:function transform-function
-    :identifier str
-    :constant (comp edn/read-string str)
-    :exp (fn [v]
-           {:op :movl
-            :src v
-            :dst :eax})
-    :statement (fn [_ v]
-                 [v {:op :ret}])}
-   ast))
+            [cljcc.tacky :as t]))
 
 (defn- mov-instruction [src dst]
   {:op  :mov
@@ -164,39 +141,29 @@
         fixed-instructions (flatten (map allocate-scratch-register instructions))]
     (cons allocate-stack-inst fixed-instructions)))
 
-(pp/pprint
- (->> (:instructions (nth tacky-ex 4))
-      (map tacky-inst->assembly-inst)
-      (flatten)
-      (replace-pseudoregisters)
-      (fix-stack-instructions)))
+(defn- assembly-generate-instructions [tacky-instructions]
+  (->> tacky-instructions
+       (map tacky-inst->assembly-inst)
+       (flatten)
+       (replace-pseudoregisters)
+       (fix-stack-instructions)))
 
-(defn assembly-generate [ast])
+(defn- transform-function [_return-type identifier args body]
+  {:op :function
+   :identifier (second identifier)
+   :args args
+   :instructions (assembly-generate-instructions (:instructions body))})
 
-(defn run-compile [source]
+(defn- tacky-ast->assembly [ast]
+  (insta/transform
+   {:function transform-function}
+   ast))
+
+(defn generate-assembly [source]
   (-> source
       p/parse
-      ast->compile))
-
-(def tacky-ex
-  [:function
-   "int"
-   [:identifier "main"]
-   "void"
-   {:instructions
-    [{:type :unary,
-      :unary-operator :negate,
-      :dst {:type :variable, :value "tmp.0"},
-      :src {:type :constant, :value 8}}
-     {:type :unary,
-      :unary-operator :complement,
-      :dst {:type :variable, :value "tmp.1"},
-      :src {:type :variable, :value "tmp.0"}}
-     {:type :unary,
-      :unary-operator :negate,
-      :dst {:type :variable, :value "tmp.2"},
-      :src {:type :variable, :value "tmp.1"}}
-     {:type :return, :val {:type :variable, :value "tmp.2"}}]}])
+      t/tacky-generate
+      tacky-ast->assembly))
 
 (comment
 
@@ -206,14 +173,10 @@
                  p/parse
                  t/tacky-generate))
 
-  (-> ex
-      p/parse
-      ast->compile)
-
-  (-> ex
-      p/parse
-      ast->compile
-      il->assembly
-      join-assembly)
+  (pp/pprint
+   (generate-assembly
+    "int main(void) {
+return ~(-(~(-1)));
+}"))
 
   ())
