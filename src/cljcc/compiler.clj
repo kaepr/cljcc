@@ -89,12 +89,6 @@
    {"current" 0}
    pseudo-values))
 
-(create-pseudo-value-map
- (find-pseudo-values
-  (->> (:instructions (nth tacky-ex 4))
-       (map tacky-inst->assembly-inst)
-       (flatten))))
-
 (defn- pseudo->stack-operand-instruction [pvs instruction]
   (let [pseudo? (fn [inst path]
                   (let [v (get-in inst [path :operand])]
@@ -111,11 +105,6 @@
         (replace-pseudo :src)
         (replace-pseudo :dst)
         (replace-pseudo :operand))))
-
-(pseudo->stack-operand-instruction
- {"tmp.1" 0}
- {:op :mov
-  :src {:operand :pseudo :identifier "tmp.1"}})
 
 (defn- replace-pseudoregisters [instructions]
   (let [pseudo-values (find-pseudo-values instructions)

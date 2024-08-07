@@ -3,6 +3,7 @@
    [clojure.java.io :as io]
    [cljcc.compiler :as c]
    [cljcc.tacky :as t]
+   [cljcc.emit :as e]
    [clojure.pprint :as pp]
    [cljcc.log :as log]
    [cljcc.util :refer [get-os handle-sh mac-aarch64? make-file-name]]
@@ -60,10 +61,12 @@
   (let [preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
         file (io/file preprocessed-file-path)
         source (slurp file)
-        assembled-source (c/run-compile source)
+        assembly-ast (c/generate-assembly source)
+        assembly-output (e/emit assembly-ast)
         out-file-path (make-file-name directory (remove-extension filename) "s")]
-    (spit out-file-path assembled-source)
-    (log/info (str "Succesfully generated assembly file.\n" assembled-source))))
+    (spit out-file-path assembly-output)
+    (log/info (str "Succesfully generated assembly ast.\n" assembly-ast))
+    (log/info (str "Succesfully generated assembly file.\n" assembly-output))))
 
 (defn cleanup-step [directory filename]
   (let [file-without-ext (remove-extension filename)]
