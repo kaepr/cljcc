@@ -38,7 +38,12 @@
     :sub-exp :sub
     :mul-exp :mul
     :div-exp :div
-    :mod-exp :mod))
+    :mod-exp :mod
+    :bit-and-exp :bit-and
+    :bit-or-exp :bit-or
+    :bit-xor-exp :bit-xor
+    :bit-right-shift-exp :bit-right-shift
+    :bit-left-shift-exp :bit-left-shift))
 
 (defn- unary-instruction [unary-operator src dst]
   {:type :unary
@@ -62,7 +67,12 @@
     :sub-exp
     :mul-exp
     :mod-exp
-    :div-exp})
+    :div-exp
+    :bit-and-exp
+    :bit-or-exp
+    :bit-xor-exp
+    :bit-right-shift-exp
+    :bit-left-shift-exp})
 
 (defn- binary-expr? [v]
   (contains? binary-exprs v))
@@ -121,7 +131,7 @@
 
   (pp/pprint
    (tacky-generate
-    (p/parse "int main(void) {return 1 * 2 - 3 * (4 + 5);}")))
+    (p/parse "int main(void) {return 1 * 2 & 3 * (4 + 5);}")))
 
   (pp/pprint
    (p/parse "int main(void) {return 1 * 2 - 3 * (4 + 5);}"))

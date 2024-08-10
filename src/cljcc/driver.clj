@@ -40,6 +40,7 @@
         assembly-ast (c/generate-assembly source)
         assembly-output (e/emit assembly-ast)
         assembly-out-file-path (make-file-name directory (remove-extension filename) "s")
+        _ (println assembly-output)
         _ (spit assembly-out-file-path assembly-output)
         output-file (str directory "/" file-without-ext)
         output (handle-sh "gcc" assembly-file "-o" output-file)]

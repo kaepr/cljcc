@@ -60,6 +60,11 @@
                          :add "addl"
                          :sub "subl"
                          :mul "imull"
+                         :bit-and "andl"
+                         :bit-xor "xorl"
+                         :bit-or "orl"
+                         :bit-left-shift "sall"
+                         :bit-right-shift "sarl"
                          (throw (AssertionError. (str "Invalid binary operator: " instruction))))]
     [(format "    %s        %s, %s" binop-operator src dst)]))
 
