@@ -5,6 +5,8 @@
             [clojure.string :as str]
             [clojure.pprint :as pp]))
 
+;;;; Operand Emit
+
 (defn- imm-opernad-emit [operand]
   (format "$%d" (:value operand)))
 
@@ -14,7 +16,9 @@
 (defn- register-operand [operand]
   (condp = (:register operand)
     :ax "%eax"
+    :dx "%edx"
     :r10 "%r10d"
+    :r11 "%r11d"
     (throw (AssertionError. (str "Invalid register operand: " operand)))))
 
 (def operand-emitters
@@ -27,6 +31,8 @@
   (if-let [[_ operand-emit-fn] (find operand-emitters (:operand operand))]
     (operand-emit-fn operand)
     (throw (AssertionError. (str "Invalid operand: " operand)))))
+
+;;;; Instruction Emit
 
 (defn- mov-instruction-emit [instruction]
   (let [src (operand-emit (:src instruction))
@@ -43,8 +49,25 @@
         assembly-operator (condp = (:unary-operator instruction)
                             :complement "notl"
                             :negate "negl"
-                            (throw (AssertionError. (str "Invalid unary operator." instruction))))]
+                            (throw (AssertionError. (str "Invalid unary operator: " instruction))))]
     [(format "    %s        %s" assembly-operator operand)]))
+
+(defn- binary-instruction-emit [instruction]
+  (let [src (operand-emit (:src instruction))
+        dst (operand-emit (:dst instruction))
+        binop (:binary-operator instruction)
+        binop-operator (condp = binop
+                         :add "addl"
+                         :sub "subl"
+                         :mul "imull"
+                         (throw (AssertionError. (str "Invalid binary operator: " instruction))))]
+    [(format "    %s        %s, %s" binop-operator src dst)]))
+
+(defn- cdq-instruction-emit [_instruction]
+  ["    cdq"])
+
+(defn- idiv-instruction-emit [instruction]
+  [(format "    idivl       %s" (operand-emit (:operand instruction)))])
 
 (defn- allocate-stack-instruction-emit [instruction]
   [(format "    subq        $%d, %%rsp" (:value instruction))])
@@ -53,6 +76,9 @@
   "Map of assembly instructions to function emitters."
   {:mov #'mov-instruction-emit
    :ret #'ret-instruction-emit
+   :binary #'binary-instruction-emit
+   :cdq #'cdq-instruction-emit
+   :idiv #'idiv-instruction-emit
    :unary #'unary-instruction-emit
    :allocate-stack #'allocate-stack-instruction-emit})
 
@@ -124,7 +150,7 @@
    (emit
     (c/generate-assembly
      "int main(void) {
-       return -(((((10)))));
+       return 6 / 3 / 2;
     }")))
 
   (-> ex

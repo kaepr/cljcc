@@ -34,6 +34,13 @@
 (defn assemble-step [directory filename]
   (let [file-without-ext (remove-extension filename)
         assembly-file (make-file-name directory file-without-ext "s")
+        preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
+        file (io/file preprocessed-file-path)
+        source (slurp file)
+        assembly-ast (c/generate-assembly source)
+        assembly-output (e/emit assembly-ast)
+        assembly-out-file-path (make-file-name directory (remove-extension filename) "s")
+        _ (spit assembly-out-file-path assembly-output)
         output-file (str directory "/" file-without-ext)
         output (handle-sh "gcc" assembly-file "-o" output-file)]
     (if (= 1 (:exit output))
@@ -61,12 +68,8 @@
   (let [preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
         file (io/file preprocessed-file-path)
         source (slurp file)
-        assembly-ast (c/generate-assembly source)
-        assembly-output (e/emit assembly-ast)
-        out-file-path (make-file-name directory (remove-extension filename) "s")]
-    (spit out-file-path assembly-output)
-    (log/info (str "Succesfully generated assembly ast.\n" assembly-ast))
-    (log/info (str "Succesfully generated assembly file.\n" assembly-output))))
+        assembly-ast (c/generate-assembly source)]
+    (log/info (str "Succesfully generated assembly ast.\n" assembly-ast))))
 
 (defn cleanup-step [directory filename]
   (let [file-without-ext (remove-extension filename)]
