@@ -3,6 +3,7 @@
    [clojure.java.io :as io]
    [cljcc.compiler :as c]
    [cljcc.tacky :as t]
+   [cljcc.lexer :as l]
    [cljcc.emit :as e]
    [clojure.pprint :as pp]
    [cljcc.log :as log]
@@ -56,6 +57,14 @@
       (log/info "Input file is succesfully parsed.")
       (throw (Exception. "Failed during parsing")))))
 
+(defn lexer-step [directory filename]
+  (let [preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
+        file (io/file preprocessed-file-path)
+        source (slurp file)
+        output (l/lex source)]
+    (log/info "Input file is succesfully lexed.")
+    (pp/pprint output)))
+
 (defn tacky-step [directory filename]
   (let [preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
         file (io/file preprocessed-file-path)
@@ -78,18 +87,19 @@
     (io/delete-file (make-file-name directory file-without-ext "s") true)))
 
 (defn create-steps [options directory filename]
-  (let [base-steps [(partial validate-os)
-                    (partial preprocessor-step directory filename)]
-        parser-step-fn (partial parser-step directory filename)
-        compiler-step-fn (partial compiler-step directory filename)
-        assemble-step-fn (partial assemble-step directory filename)
-        tacky-step-fn (partial tacky-step directory filename)]
+  (let [steps [(partial validate-os)
+               (partial preprocessor-step directory filename)
+               (partial lexer-step directory filename)
+               (partial parser-step directory filename)
+               (partial tacky-step directory filename)
+               (partial compiler-step directory filename)
+               (partial assemble-step directory filename)]]
     (cond
-      (:parse options) (concat base-steps [parser-step-fn])
-      (:tacky options) (concat base-steps [parser-step-fn tacky-step-fn])
-      (:codegen options) (concat base-steps [parser-step-fn tacky-step-fn compiler-step-fn])
-      :else (concat base-steps
-                    [parser-step-fn tacky-step-fn compiler-step-fn assemble-step-fn]))))
+      (:lex options) (subvec steps 0 3)
+      (:parse options) (subvec steps 0 4)
+      (:tacky options) (subvec steps 0 5)
+      (:codegen options) (subvec steps 0 6)
+      :else steps)))
 
 (defn run-steps [options directory filename]
   (let [steps (create-steps options directory filename)]

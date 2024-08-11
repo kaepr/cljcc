@@ -30,3 +30,26 @@
     (log/info msg)
     (log/error msg))
   (System/exit status))
+
+(defn letter? [^Character ch]
+  (or (= \_ ch)
+      (Character/isLetter ch)))
+
+(defn letter-digit? [^Character ch]
+  (or (= \_ ch)
+      (Character/isLetterOrDigit ch)))
+
+(defn digit? [^Character ch]
+  (Character/isDigit ch))
+
+(defn newline? [ch]
+  (= \newline ch))
+
+(defn whitespace? [^Character ch]
+  (Character/isWhitespace ch))
+
+(defn read-number [str]
+  (try
+    (Double/parseDouble str)
+    (catch Exception e
+      (throw (ex-info "Lexer error. Malformed number." {:message (.getMessage e)})))))
