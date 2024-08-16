@@ -9,10 +9,12 @@
    :line 1
    :col 1})
 
+(str \1 nil)
+
 (defn lex
   ([source]
    (lex source 0 (lexer-ctx)))
-  ([[ch :as source] pos {:keys [line col] :as ctx}]
+  ([[ch pk :as source] pos {:keys [line col] :as ctx}]
    (cond
      (empty? source) (update ctx :tokens #(conj % (t/create :eof line col)))
      (newline? ch) (recur (next source)
@@ -20,6 +22,12 @@
                           (-> ctx
                               (update :line inc)
                               (update :col (fn [_] 1))))
+     (contains?
+      t/chrs-kind-map (str ch pk)) (recur (next (next source))
+                                          (+ pos 2)
+                                          (-> ctx
+                                              (update :col #(+ % 2))
+                                              (update :tokens #(conj % (t/create (get t/chrs-kind-map (str ch pk)) line col)))))
      (contains?
       t/chrs-kind-map ch) (recur (next source)
                                  (+ pos 1)

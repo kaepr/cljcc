@@ -47,7 +47,8 @@
    "++" :increment
    \; :semicolon
    \+ :plus
-   \- :minus
+   \- :hyphen
+   \~ :complement
    \* :multiply
    \% :remainder
    \/ :divide})
