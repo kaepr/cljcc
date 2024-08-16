@@ -53,5 +53,6 @@ bb run-main "path/to/file.c"
 Some talks / projects which helped in implementation.
 
 * [What's So Hard About Writing A Compiler, Anyway? Oh - Ramsey Nasser](https://www.youtube.com/watch?v=_7sncBhluXI)
-* [Clojure Lexer implementation by github.com/Vikasg7](https://github.com/ThePrimeagen/ts-rust-zig-deez/tree/master/clj)
+* [Clojure Lexer implementation by Vikasg7](https://github.com/ThePrimeagen/ts-rust-zig-deez/tree/master/clj)
+
 
