@@ -1,90 +1,83 @@
 (ns cljcc.parser
   (:require
-   [instaparse.core :as insta]
+   [cljcc.lexer :as l]
    [clojure.pprint :as pp]))
 
-(def whitespace
-  (insta/parser
-   "whitespace = #'\\s+'"))
+(defn- expect [expected-kind [token & rst]]
+  (if (= expected-kind (:kind token))
+    [token rst]
+    (throw (ex-info "Parser Error." {:expected expected-kind
+                                     :actual (:kind token)}))))
 
-(declare parse)
+(defn- parse-exp [tokens]
+  (let [[t rst] (expect :number tokens)]
+    [{:type :exp
+      :value {:type :constant-exp
+              :value (:literal t)}} rst]))
 
-(def c-parser
-  (insta/parser
-   "<program> = function+
-    function = #'int\\b' identifier <'('> #'void\\b' <')'> <'{'> statement <'}'>
-    statement = #'return\\b' exp <';'>
-    exp = exp-prime
-    <exp-prime> = <'('> exp-prime <')'> | unop-exp | constant-exp
-    unop-exp = unop exp
-    unop = #'-' | #'~'
-    identifier = #'[a-zA-Z_]\\w*\\b'
-    constant-exp = #'[0-9]+\\b'
-    keyword = #'int\\b' | #'return\\b' | #'void\\b'"
-   :auto-whitespace whitespace))
+(defn- parse-return-statement [tokens]
+  (let [[_ rst] (expect :kw-return tokens)
+        [constant-node rst] (parse-exp rst)]
+    [{:type :statement
+      :statement-type :return
+      :value constant-node}
+     rst]))
 
-(def binop-parser
-  (insta/parser
-   "<program> = function+
-    function = #'int\\b' identifier <'('> #'void\\b' <')'> <'{'> statement <'}'>
-    statement = #'return\\b' exp <';'>
-    exp = exp-prime
-    <exp-prime> = mul-div-mod | add-exp | sub-exp
-    add-exp = exp-prime <'+'> mul-div-mod
-    sub-exp = exp-prime <'-'> mul-div-mod
-    <mul-div-mod> = term | mul-exp | div-exp | mod-exp
-    mul-exp = mul-div-mod <'*'> term
-    div-exp = mul-div-mod <'/'> term
-    mod-exp = mul-div-mod <'%'> term
-    <term> = constant-exp | unary-exp | <'('> exp-prime <')'>
-    unary-exp = unary-operator term
-    unary-operator = #'-' | #'~'
-    identifier = #'[a-zA-Z_]\\w*\\b'
-    constant-exp = #'[0-9]+\\b'
-    keyword = #'int\\b' | #'return\\b' | #'void\\b'"
-   :auto-whitespace whitespace))
+(defn- parse-statement
+  "Parses a single statement. Expects a semicolon at the end."
+  [[token :as tokens]]
+  (let [[statement rst]
+        (cond
+          (= (:kind token) :kw-return) (parse-return-statement tokens)
+          :else (throw (ex-info "Parser Error. Unexpected statement. " {:token token})))
+        [_ rst] (expect :semicolon rst)]
+    [statement rst]))
 
-(def bitwise-parser
-  (insta/parser
-   "<program> = function+
-    function = #'int\\b' identifier <'('> #'void\\b' <')'> <'{'> statement <'}'>
-    statement = #'return\\b' exp <';'>
-    exp = exp-prime
-    <exp-prime> = mul-div-mod | add-exp | sub-exp
-    add-exp = exp-prime <'+'> mul-div-mod
-    sub-exp = exp-prime <'-'> mul-div-mod
-    <mul-div-mod> = bitwise-exp-prime | mul-exp | div-exp | mod-exp
-    mul-exp = mul-div-mod <'*'> bitwise-exp-prime
-    div-exp = mul-div-mod <'/'> bitwise-exp-prime
-    mod-exp = mul-div-mod <'%'> bitwise-exp-prime
-    <bitwise-exp-prime> = bit-and-exp | bit-or-exp | bit-xor-exp | bit-left-shift-exp | bit-right-shift-exp | term
-    bit-and-exp = bitwise-exp-prime <'&'> term
-    bit-or-exp = bitwise-exp-prime <'|'> term
-    bit-xor-exp = bitwise-exp-prime <'^'> term
-    bit-left-shift-exp = bitwise-exp-prime <'<<'> term
-    bit-right-shift-exp = bitwise-exp-prime <'>>'> term
-    <term> = constant-exp | unary-exp | <'('> exp-prime <')'>
-    unary-exp = unary-operator term
-    unary-operator = #'-' | #'~'
-    identifier = #'[a-zA-Z_]\\w*\\b'
-    constant-exp = #'[0-9]+\\b'
-    keyword = #'int\\b' | #'return\\b' | #'void\\b'"
-   :auto-whitespace whitespace))
+(defn- keyword->type [k]
+  (condp = k
+    :kw-int "int"
+    (throw (ex-info "Parser Error. Unsupported type." {:keyword k}))))
 
-(defn parseable? [result]
-  (not (insta/failure? result)))
+(defn- parse-function [tokens]
+  (let [[fn-type-token rst] (expect :kw-int tokens)
+        [fn-identifier-token rst] (expect :identifier rst)
+        [_ rst] (expect :left-paren rst)
+        [fn-parameter-token rst] (expect :kw-void rst)
+        [_ rst] (expect :right-paren rst)
+        [_ rst] (expect :left-curly rst)
+        [statement rst] (parse-statement rst)
+        [_ rst] (expect :right-curly rst)]
+    [{:type :function
+      :return-type (keyword->type (:kind fn-type-token))
+      :identifier (:literal fn-identifier-token)
+      :parameters (:kind fn-parameter-token)
+      :statements [statement]}
+     rst]))
 
-(defn parse [source]
-  (bitwise-parser source))
+(defn- parse-program [tokens]
+  (let [[ast rst] (parse-function tokens)
+        _ (expect :eof rst)]
+    [ast]))
+
+(defn parse [tokens]
+  (-> tokens
+      :tokens
+      parse-program))
 
 (comment
 
   (parse "int main(void) {return 2;}")
 
-  (parse "
+  (pp/pprint (parse (l/lex "
   int main(void) {
   return 2;
-  }")
+  }")))
+
+  (pp/pprint
+   (l/lex "
+  int main(void) {
+    return 2;
+  }"))
 
   (parse "int main(void) {
    return -(((((10)))));
@@ -93,17 +86,5 @@
   (pp/pprint (parse "int main(void) {
    return 1 & 2 + 6 & 6;
    }"))
-
-  (pp/pprint
-   (binop-parser
-    "int main(void) {
-    return -1 * 2 - ~3 * -(-4 + 5);
-     }"))
-
-  (pp/pprint
-   (binop-parser
-    "int main(void) {
-       return -2;
-     }"))
 
   ())

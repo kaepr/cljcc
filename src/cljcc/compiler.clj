@@ -1,8 +1,8 @@
 (ns cljcc.compiler
   (:require [cljcc.parser :as p]
-            [instaparse.core :as insta]
             [clojure.pprint :as pp]
-            [cljcc.tacky :as t]))
+            [cljcc.tacky :as t]
+            [cljcc.lexer :as l]))
 
 (def registers #{:ax :dx :r10 :r11})
 
@@ -208,30 +208,28 @@
        (map fix-instruction)
        flatten))
 
-(defn- transform-function [_return-type identifier args body]
-  {:op :function
-   :identifier (second identifier)
-   :args args
-   :instructions (assembly-generate-instructions (:instructions body))})
+(defn- transform-function [fn-ast]
+  {:op (:type fn-ast)
+   :identifier (:identifier fn-ast)
+   :parameters (:parameters fn-ast)
+   :instructions (assembly-generate-instructions (:instructions fn-ast))})
 
 (defn- tacky-ast->assembly [ast]
-  (insta/transform
-   {:function transform-function}
-   ast))
+  (map transform-function ast))
 
 (defn generate-assembly [source]
   (-> source
+      l/lex
       p/parse
       t/tacky-generate
       tacky-ast->assembly))
 
 (comment
 
-  (def ex "int main(void) {return -2;}")
+  (def ex "int main(void){return 2;}")
 
   (pp/pprint (-> ex
-                 p/parse
-                 t/tacky-generate))
+                 generate-assembly))
 
   (pp/pprint
    (generate-assembly

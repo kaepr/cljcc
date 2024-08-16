@@ -41,4 +41,4 @@
         (d/run file-path options)
         (exit 0 "Successfully executed.")
         (catch Exception e
-          (exit 1 (ex-message e)))))))
+          (exit 1 (ex-message e) e))))))

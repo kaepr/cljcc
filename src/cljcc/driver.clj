@@ -52,10 +52,10 @@
 (defn parser-step [directory filename]
   (let [preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
         file (io/file preprocessed-file-path)
-        source (slurp file)]
-    (if (p/parseable? (p/parse source))
-      (log/info "Input file is succesfully parsed.")
-      (throw (Exception. "Failed during parsing")))))
+        source (slurp file)
+        ast (p/parse (l/lex source))]
+    (log/info "Input file is succesfully parsed.")
+    (pp/pprint ast)))
 
 (defn lexer-step [directory filename]
   (let [preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
@@ -69,7 +69,7 @@
   (let [preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
         file (io/file preprocessed-file-path)
         source (slurp file)
-        output (t/tacky-generate (p/parse source))]
+        output (t/tacky-generate (p/parse (l/lex source)))]
     (log/info (str
                "Successfully generated Tacky IR.\n"
                (with-out-str (pp/pprint output))))))

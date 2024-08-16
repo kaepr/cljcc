@@ -25,11 +25,15 @@
     (apply sh "arch" "-x86_64" command args)
     (apply sh command args)))
 
-(defn exit [status msg]
-  (if (= status 0)
-    (log/info msg)
-    (log/error msg))
-  (System/exit status))
+(defn exit
+  ([status msg]
+   (if (= status 0)
+     (log/info msg)
+     (log/error msg))
+   (System/exit status))
+  ([status msg e]
+   (log/error (ex-data e))
+   (exit status msg)))
 
 (defn letter? [^Character ch]
   (or (= \_ ch)
@@ -50,6 +54,6 @@
 
 (defn read-number [str]
   (try
-    (Double/parseDouble str)
+    (Integer/parseInt str)
     (catch Exception e
       (throw (ex-info "Lexer error. Malformed number." {:message (.getMessage e)})))))

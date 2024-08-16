@@ -1,7 +1,7 @@
 (ns cljcc.tacky
   (:require
    [clojure.pprint :as pp]
-   [instaparse.core :as insta]
+   [cljcc.lexer :as l]
    [cljcc.parser :as p]))
 
 (def counter "Global integer counter for generating unique identifier names." (atom 0))
@@ -23,9 +23,9 @@
    {:type :variable
     :value (create-identifier identifier)}))
 
-(defn constant-instruction [^String v]
+(defn constant-instruction [^Integer v]
   {:type :constant
-   :value (Long. v)})
+   :value v})
 
 (defn- unary-operator [^String unop]
   (condp = unop
@@ -80,7 +80,7 @@
 (declare expression-handler)
 
 (defn- constant-expr-handler [e]
-  {:val (constant-instruction (second e))})
+  {:val (constant-instruction (:value e))})
 
 (defn- unary-expr-handler [e]
   (let [inner (expression-handler (nth e 2))
@@ -103,14 +103,14 @@
      :instructions (flatten [(:instructions e1) (:instructions e2) instruction])}))
 
 (defn- expression-handler [e]
-  (when-let [exp-type (first e)]
+  (when-let [exp-type (:type e)]
     (cond
       (= exp-type :constant-exp) (constant-expr-handler e)
       (= exp-type :unary-exp) (unary-expr-handler e)
       (binary-expr? exp-type) (binary-expr-handler e))))
 
 (defn- exp-instructions [exp]
-  (expression-handler (second exp)))
+  (expression-handler (:value exp)))
 
 (defn- ret-instructions [exp]
   (let [e (exp-instructions exp)
@@ -118,16 +118,24 @@
         instructions (:instructions e)]
     (conj (vec instructions) (return-instruction val))))
 
-(defn- statement-transform [_ret-keyword exp]
-  {:instructions (remove nil? (ret-instructions exp))})
+(defn ast-statement->tacky-instructions [statement]
+  (remove nil? (ret-instructions (:value statement))))
 
 (defn tacky-generate [ast]
   (reset! counter 0)
-  (insta/transform {:statement statement-transform} ast))
+  (map (fn [f]
+         (-> f
+             (assoc :instructions (flatten (map ast-statement->tacky-instructions (:statements f))))
+             (dissoc :statements)))
+       ast))
 
 (comment
 
   (reset! counter 0)
+
+  (pp/pprint
+   (tacky-generate
+    (p/parse (l/lex "int main(void) {return 1;}"))))
 
   (pp/pprint
    (tacky-generate

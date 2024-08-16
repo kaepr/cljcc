@@ -4,8 +4,6 @@
    [cljcc.token :as t]
    [clojure.pprint :as pp]))
 
-(re-find #"[0-9]+\b" "123213bbb 456")
-
 (defn- lexer-ctx []
   {:tokens []
    :line 1
@@ -14,7 +12,7 @@
 (defn lex
   ([source]
    (lex source 0 (lexer-ctx)))
-  ([[ch pk & rst :as source] pos {:keys [line col] :as ctx}]
+  ([[ch :as source] pos {:keys [line col] :as ctx}]
    (cond
      (empty? source) (update ctx :tokens #(conj % (t/create :eof line col)))
      (newline? ch) (recur (next source)

@@ -158,6 +158,13 @@
        return 6 / 3 / 2;
     }")))
 
+  (println
+   (emit
+    (c/generate-assembly
+     "int main(void) {
+       return 6;
+    }")))
+
   (-> ex
       p/parse)
 
