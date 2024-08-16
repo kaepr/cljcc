@@ -3,24 +3,44 @@
    [cljcc.lexer :as l]
    [clojure.pprint :as pp]))
 
-(defn- expect [expected-kind [token & rst]]
-  (if (= expected-kind (:kind token))
+(defn- expect [kind [token & rst]]
+  (if (= kind (:kind token))
     [token rst]
-    (throw (ex-info "Parser Error." {:expected expected-kind
+    (throw (ex-info "Parser Error." {:expected kind
                                      :actual (:kind token)}))))
 
-(defn- parse-exp [tokens]
-  (let [[t rst] (expect :number tokens)]
-    [{:type :exp
-      :value {:type :constant-exp
-              :value (:literal t)}} rst]))
+(defn- expect-in [kinds [{kind :kind :as token} & rst]]
+  (if (contains? kinds kind)
+    [token rst]
+    (throw (ex-info "Parser Error." {:expected kinds
+                                     :actual token}))))
+
+(defn- parse-exp [[{kind :kind :as token} :as tokens]]
+  (cond
+    (= kind :number) [{:type :exp
+                       :exp-type :constant-exp
+                       :value (:literal token)}
+                      (rest tokens)]
+    (contains?
+     #{:complement :hyphen} kind) (let [operator kind
+                                        [e rst] (parse-exp (rest tokens))]
+                                    [{:type :exp
+                                      :exp-type :unary-exp
+                                      :unary-operator operator
+                                      :value e}
+                                     rst])
+    (= kind :left-paren) (let [[e rst] (parse-exp (rest tokens))
+                               [_ rst] (expect :right-paren rst)]
+                           [e rst])
+    :else (throw (ex-info "Parser Error." {:expected "number, (, -, ~"
+                                           :actual token}))))
 
 (defn- parse-return-statement [tokens]
   (let [[_ rst] (expect :kw-return tokens)
-        [constant-node rst] (parse-exp rst)]
+        [exp-node rst] (parse-exp rst)]
     [{:type :statement
       :statement-type :return
-      :value constant-node}
+      :value exp-node}
      rst]))
 
 (defn- parse-statement
@@ -66,12 +86,14 @@
 
 (comment
 
-  (parse "int main(void) {return 2;}")
-
   (pp/pprint (parse (l/lex "
   int main(void) {
-  return 2;
+  return -(~~~(2));
   }")))
+
+  (pp/pprint
+   (l/lex
+    "int main(void) {return (((2)))}"))
 
   (pp/pprint
    (l/lex "
