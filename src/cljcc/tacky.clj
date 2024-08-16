@@ -83,10 +83,10 @@
   {:val (constant-instruction (:value e))})
 
 (defn- unary-expr-handler [e]
-  (let [inner (expression-handler (nth e 2))
+  (let [inner (expression-handler (:value e))
         dst (variable)
         src (:val inner)
-        unary-operator (unary-operator (second (second e)))
+        unary-operator (:unary-operator e)
         instruction (unary-instruction unary-operator src dst)]
     {:val dst
      :instructions (flatten [(:instructions inner) instruction])}))
@@ -103,14 +103,14 @@
      :instructions (flatten [(:instructions e1) (:instructions e2) instruction])}))
 
 (defn- expression-handler [e]
-  (when-let [exp-type (:type e)]
+  (when-let [exp-type (:exp-type e)]
     (cond
       (= exp-type :constant-exp) (constant-expr-handler e)
       (= exp-type :unary-exp) (unary-expr-handler e)
       (binary-expr? exp-type) (binary-expr-handler e))))
 
 (defn- exp-instructions [exp]
-  (expression-handler (:value exp)))
+  (expression-handler exp))
 
 (defn- ret-instructions [exp]
   (let [e (exp-instructions exp)
@@ -135,7 +135,7 @@
 
   (pp/pprint
    (tacky-generate
-    (p/parse (l/lex "int main(void) {return 1;}"))))
+    (p/parse (l/lex "int main(void) {return -(~1);}"))))
 
   (pp/pprint
    (tacky-generate
@@ -150,44 +150,5 @@
   (pp/pprint
    (tacky-generate
     (p/parse "int main(void) {return 1 + 2 + -3 + -(4 + 5);}")))
-
-  (pp/pprint
-   (exp-instructions [:exp [:constant "2"]]))
-
-  (pp/pprint
-   (exp-instructions [:exp [:constant "2"]]))
-
-  (pp/pprint
-   (exp-instructions [:exp [:unop-exp [:unop "-"] [:exp [:constant "2"]]]]))
-
-  (def ex-exp
-    [:exp
-     [:unop-exp
-      [:unop "-"]
-      [:exp
-       [:unop-exp
-        [:unop "~"]
-        [:exp [:unop-exp [:unop "-"] [:exp [:constant "8"]]]]]]]])
-
-  (def ex-ret
-    [:statement "return"
-     [:exp
-      [:unop-exp
-       [:unop "-"]
-       [:exp
-        [:unop-exp
-         [:unop "~"]
-         [:exp [:unop-exp [:unop "-"] [:exp [:constant "8"]]]]]]]]])
-
-  (pp/pprint
-   (exp-instructions ex-exp))
-
-  (def exprg
-    "int main(void) {
-     return -(~(-8));
-   }")
-
-  (pp/pprint
-   (ret-instructions ex-ret))
 
   ())
