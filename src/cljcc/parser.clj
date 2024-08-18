@@ -1,7 +1,10 @@
 (ns cljcc.parser
   (:require
    [cljcc.lexer :as l]
+   [cljcc.token :as t]
    [clojure.pprint :as pp]))
+
+(declare parse parse-exp)
 
 (defn- expect [kind [token & rst]]
   (if (= kind (:kind token))
@@ -15,25 +18,59 @@
     (throw (ex-info "Parser Error." {:expected kinds
                                      :actual token}))))
 
-(defn- parse-exp [[{kind :kind :as token} :as tokens]]
+(defn- constant-exp-node [v]
+  {:type :exp
+   :exp-type :constant-exp
+   :value v})
+
+(defn- unary-exp-node [op v]
+  {:type :exp
+   :exp-type :unary-exp
+   :unary-operator op
+   :value v})
+
+(defn- binary-exp-node [l r op]
+  {:type :exp
+   :exp-type :binary-exp
+   :binary-operator op
+   :left l
+   :right r})
+
+(defn- parse-factor [[{kind :kind :as token} :as tokens]]
   (cond
-    (= kind :number) [{:type :exp
-                       :exp-type :constant-exp
-                       :value (:literal token)}
-                      (rest tokens)]
+    (= kind :number) [(constant-exp-node (:literal token)) (rest tokens)]
     (contains?
      #{:complement :hyphen} kind) (let [operator kind
-                                        [e rst] (parse-exp (rest tokens))]
-                                    [{:type :exp
-                                      :exp-type :unary-exp
-                                      :unary-operator operator
-                                      :value e}
-                                     rst])
+                                        [e rst] (parse-factor (rest tokens))]
+                                    [(unary-exp-node operator e) rst])
     (= kind :left-paren) (let [[e rst] (parse-exp (rest tokens))
                                [_ rst] (expect :right-paren rst)]
                            [e rst])
-    :else (throw (ex-info "Parser Error." {:expected "number, (, -, ~"
-                                           :actual token}))))
+    :else (throw (ex-info "Parser Error. Malformed token." {:token token}))))
+
+(defn- precedence [kind]
+  (kind t/bin-ops))
+
+(defn- parse-exp
+  ([tokens]
+   (parse-exp tokens 0))
+  ([tokens min-prec]
+   (loop [[left rst] (parse-factor tokens)
+          tokens rst]
+     (let [[{kind :kind :as _token} :as tokens] tokens]
+       (if (and (contains? t/bin-ops kind) (>= (precedence kind) min-prec))
+         (let [[right rst] (parse-exp (rest tokens) (+ (precedence kind) 1))]
+           (recur [(binary-exp-node left right kind)] rst))
+         [left tokens])))))
+
+(comment
+
+  (pp/pprint (parse (l/lex "
+  int main(void) {
+  return -1 * 2 + 3;
+  }")))
+
+  ())
 
 (defn- parse-return-statement [tokens]
   (let [[_ rst] (expect :kw-return tokens)
@@ -88,12 +125,12 @@
 
   (pp/pprint (parse (l/lex "
   int main(void) {
-  return -(~~~(2));
+  return 1 * 2 - 3 * (4 + 5);
   }")))
 
   (pp/pprint
    (l/lex
-    "int main(void) {return (((2)))}"))
+    "int main(void) {return 1 + 2;}"))
 
   (pp/pprint
    (l/lex "

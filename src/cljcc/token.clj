@@ -37,6 +37,14 @@
 (def chrs
   #{})
 
+(def bin-ops
+  "Binary operanrs and their precedence."
+  {:plus 40
+   :hyphen 40
+   :multiply 50
+   :divide 50
+   :remainder 50})
+
 (def chrs-kind-map
   {\( :left-paren
    \) :right-paren

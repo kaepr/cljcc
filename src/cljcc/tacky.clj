@@ -27,23 +27,23 @@
   {:type :constant
    :value v})
 
-(defn- unary-operator [^String unop]
-  (condp = unop
-    "~" :complement
-    "-" :negate))
+(defn- unary-operator [op]
+  (condp = op
+    :complement :complement
+    :hyphen :negate))
 
 (defn- binary-operator [binop]
   (condp = binop
-    :add-exp :add
-    :sub-exp :sub
-    :mul-exp :mul
-    :div-exp :div
-    :mod-exp :mod
-    :bit-and-exp :bit-and
-    :bit-or-exp :bit-or
-    :bit-xor-exp :bit-xor
-    :bit-right-shift-exp :bit-right-shift
-    :bit-left-shift-exp :bit-left-shift))
+    :plus :add
+    :hyphen :sub
+    :multiply :mul
+    :divide :div
+    :remainder :mod
+    :bit-and :bit-and
+    :bit-or :bit-or
+    :bit-xor :bit-xor
+    :bit-right-shift :bit-right-shift
+    :bit-left-shift :bit-left-shift))
 
 (defn- unary-instruction [unary-operator src dst]
   {:type :unary
@@ -62,21 +62,6 @@
   {:type :return
    :val val})
 
-(def binary-exprs
-  #{:add-exp
-    :sub-exp
-    :mul-exp
-    :mod-exp
-    :div-exp
-    :bit-and-exp
-    :bit-or-exp
-    :bit-xor-exp
-    :bit-right-shift-exp
-    :bit-left-shift-exp})
-
-(defn- binary-expr? [v]
-  (contains? binary-exprs v))
-
 (declare expression-handler)
 
 (defn- constant-expr-handler [e]
@@ -86,18 +71,18 @@
   (let [inner (expression-handler (:value e))
         dst (variable)
         src (:val inner)
-        unary-operator (:unary-operator e)
+        unary-operator (unary-operator (:unary-operator e))
         instruction (unary-instruction unary-operator src dst)]
     {:val dst
      :instructions (flatten [(:instructions inner) instruction])}))
 
 (defn- binary-expr-handler [e]
-  (let [e1 (expression-handler (nth e 1))
-        e2 (expression-handler (nth e 2))
+  (let [e1 (expression-handler (:left e))
+        e2 (expression-handler (:right e))
         src1 (:val e1)
         src2 (:val e2)
         dst (variable)
-        binary-operator (binary-operator (first e))
+        binary-operator (binary-operator (:binary-operator e))
         instruction (binary-instruction binary-operator src1 src2 dst)]
     {:val dst
      :instructions (flatten [(:instructions e1) (:instructions e2) instruction])}))
@@ -107,7 +92,8 @@
     (cond
       (= exp-type :constant-exp) (constant-expr-handler e)
       (= exp-type :unary-exp) (unary-expr-handler e)
-      (binary-expr? exp-type) (binary-expr-handler e))))
+      (= exp-type :binary-exp) (binary-expr-handler e)
+      :else (throw (ex-info "Tacky error. Invalid expression." {e e})))))
 
 (defn- exp-instructions [exp]
   (expression-handler exp))
@@ -139,16 +125,6 @@
 
   (pp/pprint
    (tacky-generate
-    (p/parse "int main(void) {return 1 * 2 & 3 * (4 + 5);}")))
-
-  (pp/pprint
-   (p/parse "int main(void) {return 1 * 2 - 3 * (4 + 5);}"))
-
-  (pp/pprint
-   (p/parse "int main(void) {return 1 + 2 + -3 + -(4 + 5);}"))
-
-  (pp/pprint
-   (tacky-generate
-    (p/parse "int main(void) {return 1 + 2 + -3 + -(4 + 5);}")))
+    (p/parse (l/lex "int main(void) {return 1 * -2 / ~3 * (4 - 5);}"))))
 
   ())
