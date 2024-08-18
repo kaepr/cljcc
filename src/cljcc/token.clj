@@ -11,18 +11,26 @@
     :right-paren
 
     ;; operators
-    :plus
-    :minus
+    :bitwise-not
+
     :multiply
     :divide
     :remainder
+
+    :plus
+    :minus
+
+    :bitwise-left-shift
+    :bitwise-right-shift
+
+    :ampersand
+
+    :bitwise-xor
+
+    :bitwise-or
+
     :negate
     :assignemnt
-    :ampersand
-    :bitwise-not
-    :bitwise-or
-    :bitwise-xor
-    :bitwise-left
     :increment
     :decrement
 
@@ -39,11 +47,16 @@
 
 (def bin-ops
   "Binary operanrs and their precedence."
-  {:plus 40
-   :hyphen 40
-   :multiply 50
-   :divide 50
-   :remainder 50})
+  {:multiply 100
+   :divide 100
+   :remainder 100
+   :plus 90
+   :hyphen 90
+   :bitwise-left-shift 80
+   :bitwise-right-shift 80
+   :ampersand 70
+   :bitwise-xor 60
+   :bitwise-or 50})
 
 (def chrs-kind-map
   {\( :left-paren
@@ -53,6 +66,11 @@
    \= :assignment
    "--" :decrement
    "++" :increment
+   "<<" :bitwise-left-shift
+   ">>" :bitwise-right-shift
+   \^ :bitwise-xor
+   \| :bitwise-or
+   \& :ampersand
    \; :semicolon
    \+ :plus
    \- :hyphen

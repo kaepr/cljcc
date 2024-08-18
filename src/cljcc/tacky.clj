@@ -39,11 +39,11 @@
     :multiply :mul
     :divide :div
     :remainder :mod
-    :bit-and :bit-and
-    :bit-or :bit-or
-    :bit-xor :bit-xor
-    :bit-right-shift :bit-right-shift
-    :bit-left-shift :bit-left-shift))
+    :ampersand :bit-and
+    :bitwise-or :bit-or
+    :bitwise-xor :bit-xor
+    :bitwise-right-shift :bit-right-shift
+    :bitwise-left-shift :bit-left-shift))
 
 (defn- unary-instruction [unary-operator src dst]
   {:type :unary

@@ -83,7 +83,8 @@
         src2 (tacky-val->assembly-operand (:src2 instruction))
         dst (tacky-val->assembly-operand (:dst instruction))
         div? (= binop :div)
-        mod? (= binop :mod)]
+        mod? (= binop :mod)
+        bit-shift? (contains? #{:bit-right-shift :bit-left-shift} binop)]
     (cond
       div? [(mov-instruction src1 (reg-operand :ax))
             (cdq-instruction)
@@ -93,6 +94,9 @@
             (cdq-instruction)
             (idiv-instruction src2)
             (mov-instruction (reg-operand :dx) dst)]
+      bit-shift? [(mov-instruction src1 dst)
+                  (mov-instruction src2 (reg-operand :cx))
+                  (binary-instruction binop (reg-operand :cl) dst)]
       :else [(mov-instruction src1 dst) (binary-instruction binop src2 dst)])))
 
 (def tacky->assembly-transformers

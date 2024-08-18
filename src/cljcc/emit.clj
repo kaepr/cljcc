@@ -19,6 +19,8 @@
     :dx "%edx"
     :r10 "%r10d"
     :r11 "%r11d"
+    :cx "%ecx"
+    :cl "%cl"
     (throw (AssertionError. (str "Invalid register operand: " operand)))))
 
 (def operand-emitters
@@ -104,8 +106,8 @@
         instructions (map instruction-emit (:instructions f))]
     (flatten [globl
               name-line
-              "    pushq        %rbp"
-              "    movq         %rsp, %rbp"
+              "    pushq       %rbp"
+              "    movq        %rsp, %rbp"
               instructions])))
 
 (def emitters-top-level
@@ -122,8 +124,8 @@
 (defn emit [ast]
   (let [handle-os (fn [ast]
                     (if (= :linux (get-os))
-                      (conj (vec ast) linux-assembly-end)
-                      ast))]
+                      (conj (conj (vec ast) linux-assembly-end) "\n")
+                      (conj ast "\n")))]
     (->> ast
          (map emit-top-level)
          concat
