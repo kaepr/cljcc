@@ -5,23 +5,38 @@
             [clojure.string :as str]
             [clojure.pprint :as pp]))
 
+(defn- handle-label [identifier]
+  (condp = (get-os)
+    :mac (str "L" identifier)
+    :linux (str ".L" identifier)
+    (throw (ex-info "Error in generating label." {}))))
+
 ;;;; Operand Emit
 
-(defn- imm-opernad-emit [operand]
+(defn- imm-opernad-emit [operand _opts]
   (format "$%d" (:value operand)))
 
-(defn- stack-operand-emit [operand]
+(defn- stack-operand-emit [operand _opts]
   (format "%d(%%rbp)" (:value operand)))
 
-(defn- register-operand [operand]
-  (condp = (:register operand)
-    :ax "%eax"
-    :dx "%edx"
-    :r10 "%r10d"
-    :r11 "%r11d"
-    :cx "%ecx"
-    :cl "%cl"
-    (throw (AssertionError. (str "Invalid register operand: " operand)))))
+(defn- register-operand [operand opts]
+  (if (contains? opts :byte-1)
+    (condp = (:register operand)
+      :ax "%al"
+      :dx "%dl"
+      :r10 "%r10b"
+      :r11 "%r11b"
+      :cx "%cl"
+      :cl "%cl"
+      (throw (AssertionError. (str "Invalid register operand: " operand))))
+    (condp = (:register operand)
+      :ax "%eax"
+      :dx "%edx"
+      :r10 "%r10d"
+      :r11 "%r11d"
+      :cx "%ecx"
+      :cl "%cl"
+      (throw (AssertionError. (str "Invalid register operand: " operand))))))
 
 (def operand-emitters
   "Map of assembly operands to operand emitters."
@@ -29,10 +44,13 @@
    :reg #'register-operand
    :stack #'stack-operand-emit})
 
-(defn- operand-emit [operand]
-  (if-let [[_ operand-emit-fn] (find operand-emitters (:operand operand))]
-    (operand-emit-fn operand)
-    (throw (AssertionError. (str "Invalid operand: " operand)))))
+(defn- operand-emit
+  ([operand]
+   (operand-emit operand {}))
+  ([operand opts]
+   (if-let [[_ operand-emit-fn] (find operand-emitters (:operand operand))]
+     (operand-emit-fn operand opts)
+     (throw (AssertionError. (str "Invalid operand: " operand))))))
 
 ;;;; Instruction Emit
 
@@ -40,6 +58,27 @@
   (let [src (operand-emit (:src instruction))
         dst (operand-emit (:dst instruction))]
     [(format "    %s        %s, %s" "movl" src dst)]))
+
+(defn- cmp-instruction-emit [instruction]
+  (let [src (operand-emit (:src instruction))
+        dst (operand-emit (:dst instruction))]
+    [(format "    %s       %s, %s" "cmpl" src dst)]))
+
+(defn- jmp-instruction-emit [instruction]
+  [(format "    jmp        %s" (handle-label (:identifier instruction)))])
+
+(defn- jmpcc-instruction-emit [instruction]
+  (let [cc (name (:cond-code instruction))
+        label (handle-label (:identifier instruction))]
+    [(format "    j%s        %s" cc label)]))
+
+(defn- setcc-instruction-emit [instruction]
+  (let [cc (name (:cond-code instruction))
+        operand (operand-emit (:operand instruction) {:byte-1 true})]
+    [(format "    set%s        %s" cc operand)]))
+
+(defn- label-instruction-emit [instruction]
+  [(format "    %s:" (handle-label (:identifier instruction)))])
 
 (defn- ret-instruction-emit [_instruction]
   ["    movq        %rbp, %rsp"
@@ -87,6 +126,11 @@
    :cdq #'cdq-instruction-emit
    :idiv #'idiv-instruction-emit
    :unary #'unary-instruction-emit
+   :setcc #'setcc-instruction-emit
+   :jmp #'jmp-instruction-emit
+   :jmpcc #'jmpcc-instruction-emit
+   :label #'label-instruction-emit
+   :cmp #'cmp-instruction-emit
    :allocate-stack #'allocate-stack-instruction-emit})
 
 (defn instruction-emit [instruction]
@@ -157,7 +201,7 @@
    (emit
     (c/generate-assembly
      "int main(void) {
-       return 6 / 3 / 2;
+       return 1 + 2 == 4 + 5;
     }")))
 
   (println
