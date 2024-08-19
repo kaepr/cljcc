@@ -9,8 +9,6 @@
    :line 1
    :col 1})
 
-(str \1 nil)
-
 (defn lex
   ([source]
    (lex source 0 (lexer-ctx)))

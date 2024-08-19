@@ -108,8 +108,6 @@
   (let [transformer-fn ((:type inst) tacky->assembly-transformers)]
     (transformer-fn inst)))
 
-(declare tacky-ex)
-
 (defn- find-pseudo-values [instructions]
   (distinct
    (remove

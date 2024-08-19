@@ -11,24 +11,25 @@
     :right-paren
 
     ;; operators
-    :bitwise-not
-
     :multiply
     :divide
     :remainder
-
     :plus
     :minus
-
+    :logical-not
+    :logical-and
+    :logical-or
+    :equal-to
+    :not-equal-to
+    :less-than
+    :greater-than
+    :less-than-equal-to
+    :greater-than-equal-to
     :bitwise-left-shift
     :bitwise-right-shift
-
     :ampersand
-
     :bitwise-xor
-
     :bitwise-or
-
     :negate
     :assignemnt
     :increment
@@ -42,21 +43,49 @@
     :kw-int
     :kw-void})
 
-(def chrs
-  #{})
+(def unary-ops
+  #{:logical-not
+    :complement
+    :hyphen})
+
+(defn unary-op? [op]
+  (contains? unary-ops op))
 
 (def bin-ops
-  "Binary operanrs and their precedence."
+  "Binary operands and their precedence."
   {:multiply 100
    :divide 100
    :remainder 100
+
    :plus 90
    :hyphen 90
+
    :bitwise-left-shift 80
    :bitwise-right-shift 80
-   :ampersand 70
-   :bitwise-xor 60
-   :bitwise-or 50})
+
+   :less-than 70
+   :less-than-equal-to 70
+   :greater-than 70
+   :greater-than-equal-to 70
+
+   :equal-to 60
+   :not-equal-to 60
+
+   :ampersand 50
+
+   :bitwise-xor 40
+
+   :bitwise-or 30
+
+   :logical-and 20
+
+   :logical-or 10})
+
+(defn binary-op? [op]
+  (contains? bin-ops op))
+
+(defn precedence [op]
+  (op bin-ops))
 
 (def chrs-kind-map
   {\( :left-paren
@@ -68,6 +97,15 @@
    "++" :increment
    "<<" :bitwise-left-shift
    ">>" :bitwise-right-shift
+   \! :logical-not
+   "&&" :logical-and
+   "||" :logical-or
+   "==" :equal-to
+   "!=" :not-equal-to
+   \< :less-than
+   \> :greater-than
+   "<=" :less-than-equal-to
+   ">=" :greater-than-equal-to
    \^ :bitwise-xor
    \| :bitwise-or
    \& :ampersand
