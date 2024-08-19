@@ -49,7 +49,7 @@
 (defn- unary-instruction-emit [instruction]
   (let [operand (operand-emit (:operand instruction))
         assembly-operator (condp = (:unary-operator instruction)
-                            :complement "notl"
+                            :bit-not "notl"
                             :negate "negl"
                             (throw (AssertionError. (str "Invalid unary operator: " instruction))))]
     [(format "    %s        %s" assembly-operator operand)]))
