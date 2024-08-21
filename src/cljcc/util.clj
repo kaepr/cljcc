@@ -1,6 +1,27 @@
 (ns cljcc.util
   (:require [clojure.java.shell :refer [sh]]
+            [clojure.string :as s]
             [cljcc.log :as log]))
+
+(def ^:private counter "Global integer counter for generating unique identifier names." (atom 0))
+
+(defn create-identifier!
+  "Returns a unique identifier. Used for generating unique identifier.
+
+  Removes : from keywords.
+  Replaces all - with _ for generating valid assembly names."
+  ([]
+   (create-identifier! "tmp"))
+  ([identifier]
+   (let [n @counter
+         _ (swap! counter inc)]
+     (-> identifier
+         (str "." n)
+         (s/replace #":" "")
+         (s/replace #"-" "_")))))
+
+(defn reset-counter! []
+  (reset! counter 0))
 
 (defn make-file-name
   ([^String filename ^String ext]

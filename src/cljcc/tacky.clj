@@ -2,37 +2,19 @@
   (:require
    [clojure.pprint :as pp]
    [cljcc.lexer :as l]
-   [clojure.string :as s]
+   [cljcc.util :as u]
    [cljcc.parser :as p]))
-
-(def counter "Global integer counter for generating unique identifier names." (atom 0))
-
-(defn- create-identifier
-  "Returns a unique identifier. Used for generating tacky variable names.
-
-  Removes : from keywords.
-  Replaces all - with _ for generating valid assembly names."
-  ([]
-   (create-identifier "tmp"))
-  ([identifier]
-   (let [n @counter
-         _ (swap! counter #(+ % 1))]
-     (-> identifier
-         (str "." n)
-         (s/replace #":" "")
-         (s/replace #"-" "_")))))
 
 (defn- variable
   ([]
-   {:type :variable
-    :value (create-identifier "var")})
+   (variable "var"))
   ([identifier]
    {:type :variable
-    :value (create-identifier (str identifier))}))
+    :value (u/create-identifier! (str identifier))}))
 
 (defn- label
-  ([] (create-identifier "label"))
-  ([ident] (create-identifier ident)))
+  ([] (label "label"))
+  ([ident] (u/create-identifier! ident)))
 
 (defn constant [^Integer v]
   {:type :constant
@@ -201,7 +183,6 @@
   (remove nil? (ret-instructions (:value statement))))
 
 (defn tacky-generate [ast]
-  (reset! counter 0)
   (map (fn [f]
          (-> f
              (assoc :instructions (flatten (map ast-statement->tacky-instructions (:statements f))))
@@ -209,8 +190,6 @@
        ast))
 
 (comment
-
-  (reset! counter 0)
 
   (pp/pprint
    (tacky-generate

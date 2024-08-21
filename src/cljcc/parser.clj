@@ -27,30 +27,30 @@
     (throw (ex-info "Parser Error." {:expected kinds
                                      :actual token}))))
 
-(defn- constant-exp-node [v]
+(defn constant-exp-node [v]
   {:type :exp
    :exp-type :constant-exp
    :value v})
 
-(defn- variable-exp-node [identifier]
+(defn variable-exp-node [identifier]
   {:type :exp
    :exp-type :variable-exp
    :identifier identifier})
 
-(defn- unary-exp-node [op v]
+(defn unary-exp-node [op v]
   {:type :exp
    :exp-type :unary-exp
    :unary-operator op
    :value v})
 
-(defn- binary-exp-node [l r op]
+(defn binary-exp-node [l r op]
   {:type :exp
    :exp-type :binary-exp
    :binary-operator op
    :left l
    :right r})
 
-(defn- assignment-exp-node [l r]
+(defn assignment-exp-node [l r]
   {:type :exp
    :exp-type :assignment-exp
    :left l
@@ -84,39 +84,36 @@
              (recur [(binary-exp-node left right kind)] rst)))
          [left tokens])))))
 
-(comment
+(defn return-statement-node [e]
+  {:type :statement
+   :statement-type :return
+   :value e})
 
-  (pp/pprint (parse (l/lex "
-  int main(void) {
-  return -1 * 2 + 3;
-  }")))
+(defn expression-statement-node [e]
+  {:type :statement
+   :statement-type :expression
+   :value e})
 
-  ())
+(defn empty-statement-node []
+  {:type :statement
+   :statement-type :empty})
 
 (defn- parse-return-statement [tokens]
   (let [[_ rst] (expect :kw-return tokens)
         [exp-node rst] (parse-exp rst)
         [_ rst] (expect :semicolon rst)]
-    [{:type :statement
-      :statement-type :return
-      :value exp-node}
-     rst]))
+    [(return-statement-node exp-node) rst]))
 
 (defn- parse-expression-statement [tokens]
   (let [[exp-node rst] (parse-exp tokens)
         [_ rst] (expect :semicolon rst)]
-    [{:type :statement
-      :statement-type :expression
-      :value exp-node}
-     rst]))
+    [(expression-statement-node exp-node) rst]))
 
 (defn- parse-empty-statement
   "Parses statement expect only single semicolon"
   [tokens]
   (let [[_ rst] (expect :semicolon tokens)]
-    [{:type :statement
-      :statement-type :empty}
-     rst]))
+    [(empty-statement-node) rst]))
 
 (defn- parse-statement
   "Parses a single statement. Expects a semicolon at the end."
@@ -126,19 +123,24 @@
     (= kind :kw-return) (parse-return-statement tokens)
     :else (parse-expression-statement tokens)))
 
+(defn declaration-node
+  ([identifier] {:type :declaration
+                 :identifier identifier})
+  ([identifier v] {:type :declaration
+                   :identifier identifier
+                   :initial v}))
+
 (defn- parse-declaration [tokens]
   (let [[_ rst] (expect :kw-int tokens)
         [ident-token rst] (expect :identifier rst)
-        decl-node {:type :declaration
-                   :identifier (:literal ident-token)}
         [{kind :kind} :as tokens] rst]
     (cond
       (= kind :semicolon) (let [[_ rst] (expect :semicolon tokens)]
-                            [decl-node rst])
+                            [(declaration-node (:literal ident-token)) rst])
       (= kind :assignment) (let [[_ rst] (expect :assignment tokens)
                                  [exp-node rst] (parse-exp rst)
                                  [_ rst] (expect :semicolon rst)]
-                             [(merge decl-node {:init-value exp-node}) rst])
+                             [(declaration-node (:literal ident-token) exp-node) rst])
       :else (throw (ex-info "Parser error. Declaration error parsing." {})))))
 
 (defn- parse-block-item [[token :as tokens]]
@@ -180,7 +182,7 @@
       :tokens
       parse-program))
 
-(defn- parse-from-src [src]
+(defn parse-from-src [src]
   (-> src
       l/lex
       parse))

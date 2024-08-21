@@ -19,8 +19,9 @@
 (def cli-options
   [[nil "--lex" "Runs lexer. Does not emit any files."]
    [nil "--parse" "Runs parser. Does not emit any files."]
-   [nil "--codegen" "Runs compiler. Does not emit any files."]
+   [nil "--validate" "Runs semantic analyzer. Does not emit any files."]
    [nil "--tacky" "Runs tacky generation. Does not emit any files."]
+   [nil "--codegen" "Runs compiler. Does not emit any files."]
    ["-h" "--help"]])
 
 (defn validate-args [args]
