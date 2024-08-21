@@ -79,7 +79,9 @@
 
    :logical-and 20
 
-   :logical-or 10})
+   :logical-or 10
+
+   :assignment 1})
 
 (defn binary-op? [op]
   (contains? bin-ops op))

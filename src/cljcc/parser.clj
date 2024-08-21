@@ -6,7 +6,16 @@
 
 (declare parse parse-exp)
 
-(defn- expect [kind [token & rst]]
+(defn- keyword->type [k]
+  (condp = k
+    :kw-int "int"
+    (throw (ex-info "Parser Error. Unsupported type." {:keyword k}))))
+
+(defn- expect
+  "Expects the first token in list to be of given kind.
+
+  Returns the token and remaining tokens."
+  [kind [token & rst]]
   (if (= kind (:kind token))
     [token rst]
     (throw (ex-info "Parser Error." {:expected kind
@@ -23,6 +32,11 @@
    :exp-type :constant-exp
    :value v})
 
+(defn- variable-exp-node [identifier]
+  {:type :exp
+   :exp-type :variable-exp
+   :identifier identifier})
+
 (defn- unary-exp-node [op v]
   {:type :exp
    :exp-type :unary-exp
@@ -36,6 +50,12 @@
    :left l
    :right r})
 
+(defn- assignment-exp-node [l r]
+  {:type :exp
+   :exp-type :assignment-exp
+   :left l
+   :right r})
+
 (defn- parse-factor [[{kind :kind :as token} :as tokens]]
   (cond
     (= kind :number) [(constant-exp-node (:literal token)) (rest tokens)]
@@ -45,6 +65,7 @@
     (= kind :left-paren) (let [[e rst] (parse-exp (rest tokens))
                                [_ rst] (expect :right-paren rst)]
                            [e rst])
+    (= kind :identifier) [(variable-exp-node (:literal token)) (rest tokens)]
     :else (throw (ex-info "Parser Error. Malformed token." {:token token}))))
 
 (defn- parse-exp
@@ -55,8 +76,12 @@
           tokens rst]
      (let [[{kind :kind :as _token} :as tokens] tokens]
        (if (and (t/binary-op? kind) (>= (t/precedence kind) min-prec))
-         (let [[right rst] (parse-exp (rest tokens) (+ (t/precedence kind) 1))]
-           (recur [(binary-exp-node left right kind)] rst))
+         (if (= kind :assignment)
+           (let [[_ tokens] (expect :assignment tokens)
+                 [right rst] (parse-exp tokens (t/precedence kind))]
+             (recur [(assignment-exp-node left right)] rst))
+           (let [[right rst] (parse-exp (rest tokens) (+ (t/precedence kind) 1))]
+             (recur [(binary-exp-node left right kind)] rst)))
          [left tokens])))))
 
 (comment
@@ -70,26 +95,64 @@
 
 (defn- parse-return-statement [tokens]
   (let [[_ rst] (expect :kw-return tokens)
-        [exp-node rst] (parse-exp rst)]
+        [exp-node rst] (parse-exp rst)
+        [_ rst] (expect :semicolon rst)]
     [{:type :statement
       :statement-type :return
       :value exp-node}
      rst]))
 
+(defn- parse-expression-statement [tokens]
+  (let [[exp-node rst] (parse-exp tokens)
+        [_ rst] (expect :semicolon rst)]
+    [{:type :statement
+      :statement-type :expression
+      :value exp-node}
+     rst]))
+
+(defn- parse-empty-statement
+  "Parses statement expect only single semicolon"
+  [tokens]
+  (let [[_ rst] (expect :semicolon tokens)]
+    [{:type :statement
+      :statement-type :empty}
+     rst]))
+
 (defn- parse-statement
   "Parses a single statement. Expects a semicolon at the end."
-  [[token :as tokens]]
-  (let [[statement rst]
-        (cond
-          (= (:kind token) :kw-return) (parse-return-statement tokens)
-          :else (throw (ex-info "Parser Error. Unexpected statement. " {:token token})))
-        [_ rst] (expect :semicolon rst)]
-    [statement rst]))
+  [[{kind :kind} :as tokens]]
+  (cond
+    (= kind :semicolon) (parse-empty-statement tokens)
+    (= kind :kw-return) (parse-return-statement tokens)
+    :else (parse-expression-statement tokens)))
 
-(defn- keyword->type [k]
-  (condp = k
-    :kw-int "int"
-    (throw (ex-info "Parser Error. Unsupported type." {:keyword k}))))
+(defn- parse-declaration [tokens]
+  (let [[_ rst] (expect :kw-int tokens)
+        [ident-token rst] (expect :identifier rst)
+        decl-node {:type :declaration
+                   :identifier (:literal ident-token)}
+        [{kind :kind} :as tokens] rst]
+    (cond
+      (= kind :semicolon) (let [[_ rst] (expect :semicolon tokens)]
+                            [decl-node rst])
+      (= kind :assignment) (let [[_ rst] (expect :assignment tokens)
+                                 [exp-node rst] (parse-exp rst)
+                                 [_ rst] (expect :semicolon rst)]
+                             [(merge decl-node {:init-value exp-node}) rst])
+      :else (throw (ex-info "Parser error. Declaration error parsing." {})))))
+
+(defn- parse-block-item [[token :as tokens]]
+  (if (= :kw-int (:kind token))
+    (parse-declaration tokens)
+    (parse-statement tokens)))
+
+(defn- parse-repeatedly [tokens parse-f end-kind]
+  (loop [tokens tokens
+         res []]
+    (if (= end-kind (:kind (first tokens)))
+      [res tokens]
+      (let [[node rst] (parse-f tokens)]
+        (recur rst (conj res node))))))
 
 (defn- parse-function [tokens]
   (let [[fn-type-token rst] (expect :kw-int tokens)
@@ -98,13 +161,13 @@
         [fn-parameter-token rst] (expect :kw-void rst)
         [_ rst] (expect :right-paren rst)
         [_ rst] (expect :left-curly rst)
-        [statement rst] (parse-statement rst)
+        [block-items rst] (parse-repeatedly rst parse-block-item :right-curly)
         [_ rst] (expect :right-curly rst)]
     [{:type :function
       :return-type (keyword->type (:kind fn-type-token))
       :identifier (:literal fn-identifier-token)
       :parameters (:kind fn-parameter-token)
-      :statements [statement]}
+      :body block-items}
      rst]))
 
 (defn- parse-program [tokens]
@@ -117,12 +180,17 @@
       :tokens
       parse-program))
 
+(defn- parse-from-src [src]
+  (-> src
+      l/lex
+      parse))
+
 (comment
 
-  (pp/pprint (parse (l/lex "
+  (pp/pprint (parse-from-src "
   int main(void) {
-  return 1 == 2 - 3 * (4 + 5);
-  }")))
+int a = b = 4;
+  }"))
 
   (pp/pprint
    (l/lex
