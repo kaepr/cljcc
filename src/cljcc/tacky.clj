@@ -3,7 +3,8 @@
    [clojure.pprint :as pp]
    [cljcc.lexer :as l]
    [cljcc.util :as u]
-   [cljcc.parser :as p]))
+   [cljcc.parser :as p]
+   [cljcc.analyzer :as a]))
 
 (defn- variable
   ([]
@@ -11,6 +12,10 @@
   ([identifier]
    {:type :variable
     :value (u/create-identifier! (str identifier))}))
+
+(defn- parsed-var->tacky-var [v]
+  {:type :variable
+   :value (:identifier v)})
 
 (defn- label
   ([] (label "label"))
@@ -158,6 +163,13 @@
                              (copy-instruction (constant 1) res)
                              (label-instruction false-label)])}))
 
+(defn- assignment-exp-handler [e]
+  (let [var (parsed-var->tacky-var (:left e)) ; guaranteed to be parsed variable
+        rhs (expression-handler (:right e))]
+    {:val var
+     :instructions (flatten [(:instructions rhs)
+                             (copy-instruction (:val rhs) var)])}))
+
 (defn- expression-handler [e]
   (when-let [exp-type (:exp-type e)]
     (cond
@@ -168,28 +180,64 @@
                                    :logical-and (logical-and-handler e)
                                    :logical-or (logical-or-handler e)
                                    (binary-expr-handler e)))
+      (= exp-type :variable-exp) {:val (parsed-var->tacky-var e)}
+      (= exp-type :assignment-exp) (assignment-exp-handler e)
       :else (throw (ex-info "Tacky error. Invalid expression." {e e})))))
 
 (defn- exp-instructions [exp]
   (expression-handler exp))
 
-(defn- ret-instructions [exp]
-  (let [e (exp-instructions exp)
-        val (:val e)
-        instructions (:instructions e)]
-    (conj (vec instructions) (return-instruction val))))
+(defn- statement->tacky-instruction [s]
+  (condp = (:statement-type s)
+    :return (let [e (exp-instructions (:value s))
+                  val (:val e)
+                  instructions (:instructions e)]
+              (conj (vec instructions) (return-instruction val)))
+    :expression [(:instructions (exp-instructions (:value s)))]
+    :empty []
+    (throw (ex-info "Tacky error. Invalid statement." {:statement s}))))
 
-(defn ast-statement->tacky-instructions [statement]
-  (remove nil? (ret-instructions (:value statement))))
+(defn- declaration->tacky-instruction [d]
+  (when (:initial d)
+    (let [var (parsed-var->tacky-var d) ; only needs :identifier key in declaration
+          rhs (exp-instructions (:initial d))]
+      (flatten [(:instructions rhs) (copy-instruction (:val rhs) var)]))))
+
+(defn- block-item->tacky-instruction [item]
+  (condp = (:type item)
+    :statement (statement->tacky-instruction item)
+    :declaration (declaration->tacky-instruction item)
+    (throw (ex-info "Tacky error. Invalid block item." {:item item}))))
+
+(defn- function-body->tacky-instructions [body]
+  (let [v (->> body
+               (remove nil?)
+               (map block-item->tacky-instruction)
+               flatten
+               (remove nil?))]
+    (conj (vec v) (return-instruction (constant 0)))))
 
 (defn tacky-generate [ast]
   (map (fn [f]
          (-> f
-             (assoc :instructions (flatten (map ast-statement->tacky-instructions (:statements f))))
-             (dissoc :statements)))
+             (assoc :instructions (function-body->tacky-instructions (:body f)))
+             (dissoc :body)))
        ast))
 
+(defn tacky-from-src [src]
+  (-> src
+      l/lex
+      p/parse
+      a/validate
+      tacky-generate))
+
 (comment
+
+  (pp/pprint
+   (tacky-from-src
+    "int main(void) {
+2 + 2;
+}"))
 
   (pp/pprint
    (tacky-generate

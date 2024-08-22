@@ -68,7 +68,7 @@
                       {:body []
                        :variable-map {}}
                       (:body f))]
-    (assoc f :body updated-body)))
+    (assoc f :body (:body updated-body))))
 
 (defn validate [ast]
   (map validate-function ast))
@@ -90,7 +90,7 @@ return 0;
 }"))
 
   (pp/pprint
-   (p/parse-from-src
+   (validate-from-src
     "int main (void) {
 int x;
 int a = -1;
