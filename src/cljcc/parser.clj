@@ -113,10 +113,7 @@
 
 (defn if-statement-node
   ([cond then]
-   {:type :statement
-    :statement-type :if
-    :condition cond
-    :then-statement then})
+   (if-statement-node cond then nil))
   ([cond then else]
    {:type :statement
     :statement-type :if

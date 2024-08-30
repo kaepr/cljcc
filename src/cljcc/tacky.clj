@@ -34,22 +34,6 @@
     :logical-not :logical-not
     (throw (ex-info "Tacky Error. Invalid unary operator." {op op}))))
 
-(defn- assignment-operator
-  "Converts parser assignment operator to tacky representation."
-  [op]
-  (condp = op
-    :assignemnt :assignemnt
-    :assignment-plus :assignment-add
-    :assignment-multiply :assignment-mul
-    :assignment-minus :assignment-minus
-    :assignment-divide :assignment-div
-    :assignment-mod :assignment-mod
-    :assignment-bitwise-and :assignemnt-bit-and
-    :assignment-bitwise-or :assignemnt-bit-or
-    :assignment-bitwise-xor :assignemnt-bit-xor
-    :assignment-bitwise-left-shift :assignment-bit-left-shift
-    :assignment-bitwise-right-shift :assignment-bit-right-shift))
-
 (defn- assignment-operator->binary-operator
   "Converts parser assignment operator to binary operator keyword."
   [op]
@@ -211,6 +195,26 @@
          :instructions (flatten [(:instructions rhs)
                                  (copy-instruction (:val rhs) var)])}))))
 
+(defn- conditional-exp-handler [e]
+  (let [ce (expression-handler (:left e))
+        cv (:val ce)
+        then-e (expression-handler (:middle e))
+        else-e (expression-handler (:right e))
+        end-label (label "conditional_end")
+        else-label (label "conditional_else")
+        res (variable "conditional_result")]
+    {:val res
+     :instructions (flatten
+                    [(:instructions ce)
+                     (jump-if-zero-instruction cv else-label)
+                     (:instructions then-e)
+                     (copy-instruction (:val then-e) res)
+                     (jump-instruction end-label)
+                     (label-instruction else-label)
+                     (:instructions else-e)
+                     (copy-instruction (:val else-e) res)
+                     (label-instruction end-label)])}))
+
 (defn- expression-handler [e]
   (when-let [exp-type (:exp-type e)]
     (cond
@@ -223,10 +227,34 @@
                                    (binary-expr-handler e)))
       (= exp-type :variable-exp) {:val (parsed-var->tacky-var e)}
       (= exp-type :assignment-exp) (assignment-exp-handler e)
+      (= exp-type :conditional-exp) (conditional-exp-handler e)
       :else (throw (ex-info "Tacky error. Invalid expression." {e e})))))
 
 (defn- exp-instructions [exp]
   (expression-handler exp))
+
+(declare statement->tacky-instruction)
+
+(defn if-statement-handler [s]
+  (let [cond-exp (exp-instructions (:condition s))
+        cond-value (:val cond-exp)
+        cond-instructions (:instructions cond-exp)
+        then-instructions (statement->tacky-instruction (:then-statement s))
+        end-label (label "if_end")
+        else-label (label "if_else")
+        else? (:else-statement s)]
+    (if else?
+      [cond-instructions
+       (jump-if-zero-instruction cond-value else-label)
+       then-instructions
+       (jump-instruction end-label)
+       (label-instruction else-label)
+       (statement->tacky-instruction (:else-statement s))
+       (label-instruction end-label)]
+      [cond-instructions
+       (jump-if-zero-instruction cond-value end-label)
+       then-instructions
+       (label-instruction end-label)])))
 
 (defn- statement->tacky-instruction [s]
   (condp = (:statement-type s)
@@ -235,6 +263,7 @@
                   instructions (:instructions e)]
               (conj (vec instructions) (return-instruction val)))
     :expression [(:instructions (exp-instructions (:value s)))]
+    :if (if-statement-handler s)
     :empty []
     (throw (ex-info "Tacky error. Invalid statement." {:statement s}))))
 
