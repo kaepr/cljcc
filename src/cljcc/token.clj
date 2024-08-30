@@ -32,6 +32,16 @@
     :bitwise-or
     :negate
     :assignemnt
+    :assignment-plus
+    :assignment-multiply
+    :assignment-minus
+    :assignment-divide
+    :assignment-mod
+    :assignment-bitwise-and
+    :assignment-bitwise-or
+    :assignment-bitwise-xor
+    :assignment-bitwise-left-shift
+    :assignment-bitwise-right-shift
     :increment
     :decrement
 
@@ -47,6 +57,22 @@
   #{:logical-not
     :complement
     :hyphen})
+
+(def assignment-ops
+  #{:assignment
+    :assignment-plus
+    :assignment-multiply
+    :assignment-minus
+    :assignment-divide
+    :assignment-mod
+    :assignment-bitwise-and
+    :assignment-bitwise-or
+    :assignment-bitwise-xor
+    :assignment-bitwise-left-shift
+    :assignment-bitwise-right-shift})
+
+(defn assignment-op? [op]
+  (contains? assignment-ops op))
 
 (defn unary-op? [op]
   (contains? unary-ops op))
@@ -81,7 +107,17 @@
 
    :logical-or 10
 
-   :assignment 1})
+   :assignment 1
+   :assignment-plus 1
+   :assignment-multiply 1
+   :assignment-minus 1
+   :assignment-divide 1
+   :assignment-mod 1
+   :assignment-bitwise-and 1
+   :assignment-bitwise-or 1
+   :assignment-bitwise-xor 1
+   :assignment-bitwise-left-shift 1
+   :assignment-bitwise-right-shift 1})
 
 (defn binary-op? [op]
   (contains? bin-ops op))
@@ -108,6 +144,16 @@
    \> :greater-than
    "<=" :less-than-equal-to
    ">=" :greater-than-equal-to
+   "+=" :assignment-plus
+   "*=" :assignment-multiply
+   "-=" :assignment-minus
+   "/=" :assignment-divide
+   "%=" :assignment-mod
+   "&=" :assignment-bitwise-and
+   "|=" :assignment-bitwise-or
+   "^=" :assignment-bitwise-xor
+   "<<=" :assignment-bitwise-left-shift
+   ">>=" :assignment-bitwise-right-shift
    \^ :bitwise-xor
    \| :bitwise-or
    \& :ampersand

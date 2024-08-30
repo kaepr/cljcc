@@ -50,9 +50,10 @@
    :left l
    :right r})
 
-(defn assignment-exp-node [l r]
+(defn assignment-exp-node [l r op]
   {:type :exp
    :exp-type :assignment-exp
+   :assignment-operator op
    :left l
    :right r})
 
@@ -76,10 +77,10 @@
           tokens rst]
      (let [[{kind :kind :as _token} :as tokens] tokens]
        (if (and (t/binary-op? kind) (>= (t/precedence kind) min-prec))
-         (if (= kind :assignment)
-           (let [[_ tokens] (expect :assignment tokens)
+         (if (t/assignment-op? kind)
+           (let [[_ tokens] (expect kind tokens)
                  [right rst] (parse-exp tokens (t/precedence kind))]
-             (recur [(assignment-exp-node left right)] rst))
+             (recur [(assignment-exp-node left right kind)] rst))
            (let [[right rst] (parse-exp (rest tokens) (+ (t/precedence kind) 1))]
              (recur [(binary-exp-node left right kind)] rst)))
          [left tokens])))))
@@ -192,6 +193,8 @@
   (pp/pprint (parse-from-src "
   int main(void) {
 int a = b = 4;
+int var0 = 2;
+var0 = 41;
   }"))
 
   (pp/pprint

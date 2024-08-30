@@ -34,6 +34,38 @@
     :logical-not :logical-not
     (throw (ex-info "Tacky Error. Invalid unary operator." {op op}))))
 
+(defn- assignment-operator
+  "Converts parser assignment operator to tacky representation."
+  [op]
+  (condp = op
+    :assignemnt :assignemnt
+    :assignment-plus :assignment-add
+    :assignment-multiply :assignment-mul
+    :assignment-minus :assignment-minus
+    :assignment-divide :assignment-div
+    :assignment-mod :assignment-mod
+    :assignment-bitwise-and :assignemnt-bit-and
+    :assignment-bitwise-or :assignemnt-bit-or
+    :assignment-bitwise-xor :assignemnt-bit-xor
+    :assignment-bitwise-left-shift :assignment-bit-left-shift
+    :assignment-bitwise-right-shift :assignment-bit-right-shift))
+
+(defn- assignment-operator->binary-operator
+  "Converts parser assignment operator to binary operator keyword."
+  [op]
+  (condp = op
+    :assignemnt :assignemnt
+    :assignment-plus :plus
+    :assignment-multiply :multiply
+    :assignment-minus :hyphen
+    :assignment-divide :divide
+    :assignment-mod :remainder
+    :assignment-bitwise-and :ampersand
+    :assignment-bitwise-or :bitwise-or
+    :assignment-bitwise-xor :bitwise-xor
+    :assignment-bitwise-left-shift :bitwise-left-shift
+    :assignment-bitwise-right-shift :bitwise-right-shift))
+
 (defn- binary-operator
   "Converts parser's binary operator to tacky representation."
   [binop]
@@ -164,11 +196,20 @@
                              (label-instruction false-label)])}))
 
 (defn- assignment-exp-handler [e]
-  (let [var (parsed-var->tacky-var (:left e)) ; guaranteed to be parsed variable
-        rhs (expression-handler (:right e))]
-    {:val var
-     :instructions (flatten [(:instructions rhs)
-                             (copy-instruction (:val rhs) var)])}))
+  (let [asop (:assignment-operator e)
+        direct-assignment? (= asop :assignment)
+        var (parsed-var->tacky-var (:left e))] ; guaranteed to be parsed variable
+    (if direct-assignment?
+      (let [rhs (expression-handler (:right e))]
+        {:val var
+         :instructions (flatten [(:instructions rhs)
+                                 (copy-instruction (:val rhs) var)])})
+      (let [bin-op (assignment-operator->binary-operator (:assignment-operator e))
+            bin-exp (p/binary-exp-node (:left e) (:right e) bin-op)
+            rhs (expression-handler bin-exp)]
+        {:val var
+         :instructions (flatten [(:instructions rhs)
+                                 (copy-instruction (:val rhs) var)])}))))
 
 (defn- expression-handler [e]
   (when-let [exp-type (:exp-type e)]
@@ -236,7 +277,20 @@
   (pp/pprint
    (tacky-from-src
     "int main(void) {
-2 + 2;
+int a = 11;
+    int b = 12;
+    a &= 0 || b;
+    b ^= a || 1;
+
+    int c = 14;
+    c |= a || b;
+
+    int d = 16;
+    d >>= c || d;
+
+    int e = 18;
+    e <<= c || d;
+    return (a == 1 && b == 13 && c == 15 && d == 8 && e == 36);
 }"))
 
   (pp/pprint

@@ -16,10 +16,12 @@
                     (throw (ex-info "Undeclared variable seen." {:variable e})))
     :assignment-exp (let [left (:left e)
                           right (:right e)
+                          op (:assignment-operator e)
                           left-var? (= :variable-exp (:exp-type left))]
                       (if left-var?
                         (p/assignment-exp-node (resolve-exp left mp)
-                                               (resolve-exp right mp))
+                                               (resolve-exp right mp)
+                                               op)
                         (throw (ex-info "Invalid lvalue." {:lvalue e}))))
     :binary-exp (p/binary-exp-node (resolve-exp (:left e) mp)
                                    (resolve-exp (:right e) mp)
@@ -33,8 +35,6 @@
     (let [ident (:identifier d)
           unique-name (unique-identifier ident)
           updated-mp (assoc mp ident unique-name)
-          _ (pp/pprint mp)
-          _ (pp/pprint updated-mp)
           init (when (:initial d) (resolve-exp (:initial d) updated-mp))]
       (if init
         {:declaration (p/declaration-node unique-name init)
