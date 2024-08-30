@@ -107,6 +107,8 @@
 
    :logical-or 10
 
+   :question 5
+
    :assignment 1
    :assignment-plus 1
    :assignment-multiply 1
@@ -128,6 +130,8 @@
 (def chrs-kind-map
   {\( :left-paren
    \) :right-paren
+   \? :question
+   \: :colon
    \{ :left-curly
    \} :right-curly
    \= :assignment
@@ -170,6 +174,8 @@
     "return" :kw-return
     "void" :kw-void
     "int" :kw-int
+    "if" :kw-if
+    "else" :kw-else
     :identifier))
 
 (defn create

@@ -4,7 +4,7 @@
    [cljcc.token :as t]
    [clojure.pprint :as pp]))
 
-(declare parse parse-exp)
+(declare parse parse-exp parse-statement)
 
 (defn- keyword->type [k]
   (condp = k
@@ -57,6 +57,13 @@
    :left l
    :right r})
 
+(defn conditional-exp-node [l m r]
+  {:type :exp
+   :exp-type :conditional-exp
+   :left l
+   :middle m
+   :right r})
+
 (defn- parse-factor [[{kind :kind :as token} :as tokens]]
   (cond
     (= kind :number) [(constant-exp-node (:literal token)) (rest tokens)]
@@ -77,12 +84,17 @@
           tokens rst]
      (let [[{kind :kind :as _token} :as tokens] tokens]
        (if (and (t/binary-op? kind) (>= (t/precedence kind) min-prec))
-         (if (t/assignment-op? kind)
-           (let [[_ tokens] (expect kind tokens)
-                 [right rst] (parse-exp tokens (t/precedence kind))]
-             (recur [(assignment-exp-node left right kind)] rst))
-           (let [[right rst] (parse-exp (rest tokens) (+ (t/precedence kind) 1))]
-             (recur [(binary-exp-node left right kind)] rst)))
+         (cond
+           (t/assignment-op? kind) (let [[_ tokens] (expect kind tokens)
+                                         [right rst] (parse-exp tokens (t/precedence kind))]
+                                     (recur [(assignment-exp-node left right kind)] rst))
+           (= :question kind) (let [[_ tokens] (expect :question tokens)
+                                    [middle tokens] (parse-exp tokens)
+                                    [_ tokens] (expect :colon tokens)
+                                    [right tokens] (parse-exp tokens (inc (t/precedence kind)))]
+                                (recur [(conditional-exp-node left middle right)] tokens))
+           :else (let [[right rst] (parse-exp (rest tokens) (inc (t/precedence kind)))]
+                   (recur [(binary-exp-node left right kind)] rst)))
          [left tokens])))))
 
 (defn return-statement-node [e]
@@ -98,6 +110,19 @@
 (defn empty-statement-node []
   {:type :statement
    :statement-type :empty})
+
+(defn if-statement-node
+  ([cond then]
+   {:type :statement
+    :statement-type :if
+    :condition cond
+    :then-statement then})
+  ([cond then else]
+   {:type :statement
+    :statement-type :if
+    :condition cond
+    :then-statement then
+    :else-statement else}))
 
 (defn- parse-return-statement [tokens]
   (let [[_ rst] (expect :kw-return tokens)
@@ -116,12 +141,26 @@
   (let [[_ rst] (expect :semicolon tokens)]
     [(empty-statement-node) rst]))
 
+(defn- parse-if-statement [tokens]
+  (let [[_ tokens] (expect :kw-if tokens)
+        [_ tokens] (expect :left-paren tokens)
+        [exp-node tokens] (parse-exp tokens)
+        [_ tokens] (expect :right-paren tokens)
+        [then-stmt tokens] (parse-statement tokens)
+        else? (= :kw-else (:kind (first tokens)))]
+    (if (not else?)
+      [(if-statement-node exp-node then-stmt) tokens]
+      (let [[_ tokens] (expect :kw-else tokens)
+            [else-stmt tokens] (parse-statement tokens)]
+        [(if-statement-node exp-node then-stmt else-stmt) tokens]))))
+
 (defn- parse-statement
   "Parses a single statement. Expects a semicolon at the end."
   [[{kind :kind} :as tokens]]
   (cond
     (= kind :semicolon) (parse-empty-statement tokens)
     (= kind :kw-return) (parse-return-statement tokens)
+    (= kind :kw-if) (parse-if-statement tokens)
     :else (parse-expression-statement tokens)))
 
 (defn declaration-node
@@ -192,9 +231,10 @@
 
   (pp/pprint (parse-from-src "
   int main(void) {
-int a = b = 4;
-int var0 = 2;
-var0 = 41;
+if (123)
+ 123 ? 4 : 3;
+else
+ 523423 = 123;
   }"))
 
   (pp/pprint

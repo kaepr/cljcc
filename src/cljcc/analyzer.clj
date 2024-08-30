@@ -27,6 +27,9 @@
                                    (resolve-exp (:right e) mp)
                                    (:binary-operator e))
     :unary-exp (p/unary-exp-node (:unary-operator e) (resolve-exp (:value e) mp))
+    :conditional-exp (p/conditional-exp-node (resolve-exp (:left e) mp)
+                                             (resolve-exp (:middle e) mp)
+                                             (resolve-exp (:right e) mp))
     (throw (ex-info "Analyzer error. Invalid expression type" {:exp e}))))
 
 (defn- resolve-declaration [d mp]
@@ -46,6 +49,12 @@
   (condp = (:statement-type s)
     :return (p/return-statement-node (resolve-exp (:value s) mp))
     :expression (p/expression-statement-node (resolve-exp (:value s) mp))
+    :if (if (:else-statement s)
+          (p/if-statement-node (resolve-exp (:condition s) mp)
+                               (resolve-statement (:then-statement s) mp)
+                               (resolve-statement (:else-statement s) mp))
+          (p/if-statement-node (resolve-exp (:condition s) mp)
+                               (resolve-statement (:then-statement s) mp)))
     :empty (p/empty-statement-node)
     (throw (ex-info "Analyzer error. Invalid statement." {:statement s}))))
 
