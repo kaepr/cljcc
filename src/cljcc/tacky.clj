@@ -233,7 +233,7 @@
 (defn- exp-instructions [exp]
   (expression-handler exp))
 
-(declare statement->tacky-instruction)
+(declare statement->tacky-instruction block-item->tacky-instruction)
 
 (defn if-statement-handler [s]
   (let [cond-exp (exp-instructions (:condition s))
@@ -256,6 +256,9 @@
        then-instructions
        (label-instruction end-label)])))
 
+(defn- compound-statement-handler [s]
+  (flatten (map block-item->tacky-instruction (:block s))))
+
 (defn- statement->tacky-instruction [s]
   (condp = (:statement-type s)
     :return (let [e (exp-instructions (:value s))
@@ -264,6 +267,7 @@
               (conj (vec instructions) (return-instruction val)))
     :expression [(:instructions (exp-instructions (:value s)))]
     :if (if-statement-handler s)
+    :compound (compound-statement-handler s)
     :empty []
     (throw (ex-info "Tacky error. Invalid statement." {:statement s}))))
 
@@ -301,30 +305,47 @@
       a/validate
       tacky-generate))
 
+(def ex
+  {:type :function,
+   :return-type "int",
+   :identifier "main",
+   :parameters :kw-void,
+   :body
+   [{:type :declaration,
+     :identifier "a.0",
+     :initial {:type :exp, :exp-type :constant-exp, :value 3}}
+    {:type :statement,
+     :statement-type :compound,
+     :block
+     [{:type :declaration,
+       :identifier "a.1",
+       :initial
+       {:type :exp,
+        :exp-type :assignment-exp,
+        :assignment-operator :assignment,
+        :left {:type :exp, :exp-type :variable-exp, :identifier "a.1"},
+        :right {:type :exp, :exp-type :constant-exp, :value 4}}}]}
+    {:type :statement,
+     :statement-type :return,
+     :value {:type :exp, :exp-type :variable-exp, :identifier "a.0"}}]})
+
 (comment
 
   (pp/pprint
    (tacky-from-src
-    "int main(void) {
-int a = 11;
-    int b = 12;
-    a &= 0 || b;
-    b ^= a || 1;
-
-    int c = 14;
-    c |= a || b;
-
-    int d = 16;
-    d >>= c || d;
-
-    int e = 18;
-    e <<= c || d;
-    return (a == 1 && b == 13 && c == 15 && d == 8 && e == 36);
+    "int main (void) {
+int a = 3;
+{
+  int a = a = 4;
+}
+return a;
 }"))
 
   (pp/pprint
    (tacky-generate
-    (p/parse (l/lex "int main(void) {return -(~1);}"))))
+    (p/parse (l/lex "int main(void) {
+int a = 1;
+return 1;}"))))
 
   (pp/pprint
    (tacky-generate

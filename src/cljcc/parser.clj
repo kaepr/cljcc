@@ -4,7 +4,15 @@
    [cljcc.token :as t]
    [clojure.pprint :as pp]))
 
-(declare parse parse-exp parse-statement)
+(declare parse parse-exp parse-statement parse-block)
+
+(defn- parse-repeatedly [tokens parse-f end-kind]
+  (loop [tokens tokens
+         res []]
+    (if (= end-kind (:kind (first tokens)))
+      [res tokens]
+      (let [[node rst] (parse-f tokens)]
+        (recur rst (conj res node))))))
 
 (defn- keyword->type [k]
   (condp = k
@@ -20,12 +28,6 @@
     [token rst]
     (throw (ex-info "Parser Error." {:expected kind
                                      :actual (:kind token)}))))
-
-(defn- expect-in [kinds [{kind :kind :as token} & rst]]
-  (if (contains? kinds kind)
-    [token rst]
-    (throw (ex-info "Parser Error." {:expected kinds
-                                     :actual token}))))
 
 (defn constant-exp-node [v]
   {:type :exp
@@ -111,6 +113,11 @@
   {:type :statement
    :statement-type :empty})
 
+(defn compound-statement-node [block]
+  {:type :statement
+   :statement-type :compound
+   :block block})
+
 (defn if-statement-node
   ([cond then]
    (if-statement-node cond then nil))
@@ -151,6 +158,10 @@
             [else-stmt tokens] (parse-statement tokens)]
         [(if-statement-node exp-node then-stmt else-stmt) tokens]))))
 
+(defn- parse-compound-statement [tokens]
+  (let [[block-items tokens] (parse-block tokens)]
+    [(compound-statement-node block-items) tokens]))
+
 (defn- parse-statement
   "Parses a single statement. Expects a semicolon at the end."
   [[{kind :kind} :as tokens]]
@@ -158,6 +169,7 @@
     (= kind :semicolon) (parse-empty-statement tokens)
     (= kind :kw-return) (parse-return-statement tokens)
     (= kind :kw-if) (parse-if-statement tokens)
+    (= kind :left-curly) (parse-compound-statement tokens)
     :else (parse-expression-statement tokens)))
 
 (defn declaration-node
@@ -185,13 +197,11 @@
     (parse-declaration tokens)
     (parse-statement tokens)))
 
-(defn- parse-repeatedly [tokens parse-f end-kind]
-  (loop [tokens tokens
-         res []]
-    (if (= end-kind (:kind (first tokens)))
-      [res tokens]
-      (let [[node rst] (parse-f tokens)]
-        (recur rst (conj res node))))))
+(defn- parse-block [tokens]
+  (let [[_ tokens] (expect :left-curly tokens)
+        [block-items tokens] (parse-repeatedly tokens parse-block-item :right-curly)
+        [_ tokens] (expect :right-curly tokens)]
+    [block-items tokens]))
 
 (defn- parse-function [tokens]
   (let [[fn-type-token rst] (expect :kw-int tokens)
@@ -199,9 +209,7 @@
         [_ rst] (expect :left-paren rst)
         [fn-parameter-token rst] (expect :kw-void rst)
         [_ rst] (expect :right-paren rst)
-        [_ rst] (expect :left-curly rst)
-        [block-items rst] (parse-repeatedly rst parse-block-item :right-curly)
-        [_ rst] (expect :right-curly rst)]
+        [block-items rst] (parse-block rst)]
     [{:type :function
       :return-type (keyword->type (:kind fn-type-token))
       :identifier (:literal fn-identifier-token)
@@ -228,10 +236,14 @@
 
   (pp/pprint (parse-from-src "
   int main(void) {
-if (123)
- 123 ? 4 : 3;
-else
- 523423 = 123;
+int a = 1;
+ {
+int a = 2;
+ {
+int a = 4;
+}
+}
+return 0;
   }"))
 
   (pp/pprint

@@ -78,7 +78,7 @@
   (let [preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
         file (io/file preprocessed-file-path)
         source (slurp file)
-        output (t/tacky-generate (p/parse (l/lex source)))]
+        output (t/tacky-generate (a/validate (p/parse (l/lex source))))]
     (log/info (str
                "Successfully generated Tacky IR.\n"
                (with-out-str (pp/pprint output))))))

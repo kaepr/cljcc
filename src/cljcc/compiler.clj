@@ -2,7 +2,8 @@
   (:require [cljcc.parser :as p]
             [clojure.pprint :as pp]
             [cljcc.tacky :as t]
-            [cljcc.lexer :as l]))
+            [cljcc.lexer :as l]
+            [cljcc.analyzer :as a]))
 
 (def registers #{:ax :dx :r10 :r11 :cx :cl})
 
@@ -309,6 +310,7 @@
   (-> source
       l/lex
       p/parse
+      a/validate
       t/tacky-generate
       tacky-ast->assembly))
 
