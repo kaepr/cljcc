@@ -86,6 +86,9 @@
                              (:variable-map for-init)
                              new-var-map) ; updates new-var-map so that include possible
                                           ; variable declaration
+               for-init (if (:declaration for-init)
+                          (:declaration for-init)
+                          for-init)
                condition (resolve-optional-exp (:condition s) new-var-map)
                post (resolve-optional-exp (:post s) new-var-map)
                body (resolve-statement (:body s) new-var-map)]
@@ -200,16 +203,16 @@
   (pp/pprint
    (validate-from-src
     "int main (void) {
-int a = 3;
-{
-  int a = a = 4;
-}
+int i = 0;
+    int j = 0;
+    int k = 1;
+    for (i = 100 ;;) {
+        int i = 1;
+        int j = i + k;
+        k = j;
+    }
 
-while (a < 10) {
-break;
-}
-
-return a;
+    return k == 101 && i == 0 && j == 0;
 }"))
 
   (pp/pprint
