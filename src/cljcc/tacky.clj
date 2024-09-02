@@ -259,6 +259,70 @@
 (defn- compound-statement-handler [s]
   (flatten (map block-item->tacky-instruction (:block s))))
 
+(defn- break-statement-handler [s]
+  [(jump-instruction (str "break_" (:label s)))])
+
+(defn- continue-statement-handler [s]
+  [(jump-instruction (str "continue_" (:label s)))])
+
+(defn- while-statement-handler [s]
+  (let [continue-label (str "continue_" (:label s))
+        break-label (str "break_" (:label s))
+        cond-exp (exp-instructions (:condition s))
+        cond-value (:val cond-exp)
+        cond-instructions (:instructions cond-exp)
+        body-instructions (statement->tacky-instruction (:body s))]
+    (flatten [(label-instruction continue-label)
+              cond-instructions
+              (jump-if-zero-instruction cond-value break-label)
+              body-instructions
+              (jump-instruction continue-label)
+              (label-instruction break-label)])))
+
+(defn- do-while-statement-handler [s]
+  (let [start-label (label "do_while_start")
+        continue-label (str "continue_" (:label s))
+        break-label (str "break_" (:label s))
+        cond-exp (exp-instructions (:condition s))
+        cond-value (:val cond-exp)
+        cond-instructions (:instructions cond-exp)
+        body-instructions (statement->tacky-instruction (:body s))]
+    (flatten [(label-instruction start-label)
+              body-instructions
+              (label-instruction continue-label)
+              cond-instructions
+              (jump-if-not-zero-instruction cond-value start-label)
+              (label-instruction break-label)])))
+
+(defn- for-statement-handler [s]
+  (let [init-instructions (if (= :declaration (:type (:init s)))
+                            (block-item->tacky-instruction (:init s))
+                            (:instructions (exp-instructions (:init s))))
+        start-label (label "for_start")
+        break-label (str "break_" (:label s))
+        continue-label (str "continue_" (:label s))
+        cond? (not (nil? (:condition s)))
+        body-instructions (statement->tacky-instruction (:body s))
+        post-instructions (if (nil? (:post s))
+                            []
+                            (:instructions (exp-instructions (:post s))))
+        cond-instructions (if cond?
+                            (let [ce (exp-instructions (:condition s))
+                                  ce-inst (:instructions ce)
+                                  ce-v (:val ce)]
+                              [ce-inst
+                               (jump-if-zero-instruction ce-v break-label)])
+                            [])]
+    (flatten
+     [init-instructions
+      (label-instruction start-label)
+      cond-instructions
+      body-instructions
+      (label-instruction continue-label)
+      post-instructions
+      (jump-instruction start-label)
+      (label-instruction break-label)])))
+
 (defn- statement->tacky-instruction [s]
   (condp = (:statement-type s)
     :return (let [e (exp-instructions (:value s))
@@ -268,6 +332,11 @@
     :expression [(:instructions (exp-instructions (:value s)))]
     :if (if-statement-handler s)
     :compound (compound-statement-handler s)
+    :break (break-statement-handler s)
+    :continue (continue-statement-handler s)
+    :for (for-statement-handler s)
+    :while (while-statement-handler s)
+    :do-while (do-while-statement-handler s)
     :empty []
     (throw (ex-info "Tacky error. Invalid statement." {:statement s}))))
 
