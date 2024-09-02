@@ -176,6 +176,11 @@
     "int" :kw-int
     "if" :kw-if
     "else" :kw-else
+    "do" :kw-do
+    "while" :kw-while
+    "for" :kw-for
+    "break" :kw-break
+    "continue" :kw-continue
     :identifier))
 
 (defn create

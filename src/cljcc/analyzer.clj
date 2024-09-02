@@ -34,6 +34,11 @@
                                              (resolve-exp (:right e) mp))
     (throw (ex-info "Analyzer error. Invalid expression type" {:exp e}))))
 
+(defn- resolve-optional-exp [e var-mp]
+  (if (nil? e)
+    e
+    (resolve-exp e var-mp)))
+
 (defn- resolve-declaration [d mp]
   (if (and (contains? mp (:identifier d)) (:from-current-block (get mp (:identifier d))))
     (throw (ex-info "Analyzer error. Duplicate variable declaration." {:declaration d}))
@@ -48,6 +53,17 @@
         {:declaration (p/declaration-node unique-name)
          :variable-map updated-mp}))))
 
+(defn- copy-variable-map [var-mp]
+  (zipmap (keys var-mp)
+          (map (fn [m]
+                 (update m :from-current-block (fn [_] false)))
+               (vals var-mp))))
+
+(defn- resolve-for-init [for-init var-mp]
+  (if (= (:type for-init) :declaration)
+    (resolve-declaration for-init var-mp)
+    (resolve-optional-exp for-init var-mp)))
+
 (defn- resolve-statement [s mp]
   (condp = (:statement-type s)
     :return (p/return-statement-node (resolve-exp (:value s) mp))
@@ -58,10 +74,23 @@
                                (resolve-statement (:else-statement s) mp))
           (p/if-statement-node (resolve-exp (:condition s) mp)
                                (resolve-statement (:then-statement s) mp)))
-    :compound (let [updated-mp (zipmap (keys mp)
-                                       (map (fn [m]
-                                              (update m :from-current-block (fn [_] false)))
-                                            (vals mp)))]
+    :break s
+    :continue s
+    :while (p/while-statement-node (resolve-exp (:condition s) mp)
+                                   (resolve-statement (:body s) mp))
+    :do-while (p/do-while-statement-node (resolve-exp (:condition s) mp)
+                                         (resolve-statement (:body s) mp))
+    :for (let [new-var-map (copy-variable-map mp)
+               for-init (resolve-for-init (:init s) new-var-map)
+               new-var-map (if (:declaration for-init)
+                             (:variable-map for-init)
+                             new-var-map) ; updates new-var-map so that include possible
+                                          ; variable declaration
+               condition (resolve-optional-exp (:condition s) new-var-map)
+               post (resolve-optional-exp (:post s) new-var-map)
+               body (resolve-statement (:body s) new-var-map)]
+           (p/for-statement-node for-init condition post body))
+    :compound (let [updated-mp (copy-variable-map mp)]
                 (p/compound-statement-node (:block (resolve-block (:block s) updated-mp))))
     :empty (p/empty-statement-node)
     (throw (ex-info "Analyzer error. Invalid statement." {:statement s}))))
@@ -88,9 +117,61 @@
             :variable-map var-mp}
            block)))
 
+(defn- annotate-label [n l]
+  (assoc n :label l))
+
+(defn- label-statement
+  ([s]
+   (label-statement s nil))
+  ([s current-label]
+   (let [s-type (:statement-type s)]
+     (cond
+       (= s-type :break) (if (nil? current-label)
+                           (throw (ex-info "break statement outside of loop" {}))
+                           (p/break-statement-node current-label))
+       (= s-type :continue) (if (nil? current-label)
+                              (throw (ex-info "continue statement outside of loop" {}))
+                              (p/continue-statement-node current-label))
+       (= s-type :while) (let [new-label (unique-identifier "while_label")
+                               l-body (label-statement (:body s) new-label)
+                               l-while  (p/while-statement-node (:condition s) l-body)]
+                           (annotate-label l-while new-label))
+       (= s-type :do-while) (let [new-label (unique-identifier "do_while_label")
+                                  l-body (label-statement (:body s) new-label)
+                                  l-do-while (p/do-while-statement-node (:condition s) l-body)]
+                              (annotate-label l-do-while new-label))
+       (= s-type :for) (let [new-label (unique-identifier "for_label")
+                             l-body (label-statement (:body s) new-label)
+                             l-for (p/for-statement-node (:init s) (:condition s) (:post s) l-body)]
+                         (annotate-label l-for new-label))
+       (= s-type :if) (if (:else-statement s)
+                        (p/if-statement-node (:condition s)
+                                             (label-statement (:then-statement s) current-label)
+                                             (label-statement (:else-statement s) current-label))
+                        (p/if-statement-node (:condition s)
+                                             (label-statement (:then-statement s) current-label)))
+       (= s-type :compound) (let [update-block-f (fn [item]
+                                                   (if (= (:type item) :statement)
+                                                     (label-statement item current-label)
+                                                     item))
+                                  new-block (map update-block-f (:block s))]
+                              (p/compound-statement-node new-block))
+       (= s-type :return) s
+       (= s-type :expression) s
+       (= s-type :empty) s
+       :else (throw (ex-info "invalid statement reached during loop labelling." {}))))))
+
+(defn- resolve-loop-labels [body]
+  (let [f (fn [item]
+            (if (= :statement (:type item))
+              (label-statement item)
+              item))
+        new-body (map f body)]
+    new-body))
+
 (defn- validate-function [f]
-  (let [updated-body (resolve-block (:body f))]
-    (assoc f :body (:block updated-body))))
+  (let [body (resolve-loop-labels (:block (resolve-block (:body f))))]
+    (assoc f :body body)))
 
 (comment
 
@@ -123,6 +204,11 @@ int a = 3;
 {
   int a = a = 4;
 }
+
+while (a < 10) {
+break;
+}
+
 return a;
 }"))
 

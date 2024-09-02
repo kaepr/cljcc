@@ -4,7 +4,7 @@
    [cljcc.token :as t]
    [clojure.pprint :as pp]))
 
-(declare parse parse-exp parse-statement parse-block)
+(declare parse parse-exp parse-statement parse-block expect parse-declaration)
 
 (defn- parse-repeatedly [tokens parse-f end-kind]
   (loop [tokens tokens
@@ -13,6 +13,14 @@
       [res tokens]
       (let [[node rst] (parse-f tokens)]
         (recur rst (conj res node))))))
+
+(defn- parse-optional-expression [[{kind :kind} :as tokens] parse-f end-kind]
+  (if (= kind end-kind)
+    (let [[_ tokens] (expect end-kind tokens)]
+      [nil tokens]) ; end kind seen, so expression not found
+    (let [[e tokens] (parse-f tokens)
+          [_ tokens] (expect end-kind tokens)]
+      [e tokens])))
 
 (defn- keyword->type [k]
   (condp = k
@@ -99,6 +107,8 @@
                    (recur [(binary-exp-node left right kind)] rst)))
          [left tokens])))))
 
+;;;; Statements
+
 (defn return-statement-node [e]
   {:type :statement
    :statement-type :return
@@ -108,6 +118,20 @@
   {:type :statement
    :statement-type :expression
    :value e})
+
+(defn break-statement-node
+  ([] (break-statement-node nil))
+  ([label]
+   {:type :statement
+    :statement-type :break
+    :label label}))
+
+(defn continue-statement-node
+  ([] (continue-statement-node nil))
+  ([label]
+   {:type :statement
+    :statement-type :continue
+    :label label}))
 
 (defn empty-statement-node []
   {:type :statement
@@ -128,6 +152,33 @@
     :then-statement then
     :else-statement else}))
 
+(defn while-statement-node [cond-exp body-statement]
+  {:type :statement
+   :statement-type :while
+   :condition cond-exp
+   :body body-statement})
+
+(defn do-while-statement-node [cond-exp body-statement]
+  {:type :statement
+   :statement-type :do-while
+   :condition cond-exp
+   :body body-statement})
+
+(defn for-statement-node [for-init cond-exp post-exp body-statement]
+  {:type :statement
+   :statement-type :for
+   :condition cond-exp
+   :post post-exp
+   :init for-init
+   :body body-statement})
+
+(defn for-init-node [decl exp]
+  {:type :for-initializer
+   :init-declaration decl
+   :init-exp exp})
+
+;;;; Parse statement nodes
+
 (defn- parse-return-statement [tokens]
   (let [[_ rst] (expect :kw-return tokens)
         [exp-node rst] (parse-exp rst)
@@ -144,6 +195,48 @@
   [tokens]
   (let [[_ rst] (expect :semicolon tokens)]
     [(empty-statement-node) rst]))
+
+(defn- parse-break-statement [tokens]
+  (let [[_ tokens] (expect :kw-break tokens)
+        [_ tokens] (expect :semicolon tokens)]
+    [(break-statement-node) tokens]))
+
+(defn- parse-continue-statement [tokens]
+  (let [[_ tokens] (expect :kw-continue tokens)
+        [_ tokens] (expect :semicolon tokens)]
+    [(continue-statement-node) tokens]))
+
+(defn- parse-while-statement [tokens]
+  (let [[_ tokens] (expect :kw-while tokens)
+        [_ tokens] (expect :left-paren tokens)
+        [e tokens] (parse-exp tokens)
+        [_ tokens] (expect :right-paren tokens)
+        [s tokens] (parse-statement tokens)]
+    [(while-statement-node e s) tokens]))
+
+(defn- parse-do-while-statement [tokens]
+  (let [[_ tokens] (expect :kw-do tokens)
+        [s tokens] (parse-statement tokens)
+        [_ tokens] (expect :kw-while tokens)
+        [_ tokens] (expect :left-paren tokens)
+        [e tokens] (parse-exp tokens)
+        [_ tokens] (expect :right-paren tokens)
+        [_ tokens] (expect :semicolon tokens)]
+    [(do-while-statement-node e s) tokens]))
+
+(defn- parse-for-init-statement [[{kind :kind} :as tokens]]
+  (if (= kind :kw-int)
+    (parse-declaration tokens)
+    (parse-optional-expression tokens parse-exp :semicolon)))
+
+(defn- parse-for-statement [tokens]
+  (let [[_ tokens] (expect :kw-for tokens)
+        [_ tokens] (expect :left-paren tokens)
+        [for-init-node tokens] (parse-for-init-statement tokens)
+        [cond-exp tokens] (parse-optional-expression tokens parse-exp :semicolon)
+        [post-exp tokens] (parse-optional-expression tokens parse-exp :right-paren)
+        [stmt tokens] (parse-statement tokens)]
+    [(for-statement-node for-init-node cond-exp post-exp stmt) tokens]))
 
 (defn- parse-if-statement [tokens]
   (let [[_ tokens] (expect :kw-if tokens)
@@ -169,6 +262,11 @@
     (= kind :semicolon) (parse-empty-statement tokens)
     (= kind :kw-return) (parse-return-statement tokens)
     (= kind :kw-if) (parse-if-statement tokens)
+    (= kind :kw-break) (parse-break-statement tokens)
+    (= kind :kw-continue) (parse-continue-statement tokens)
+    (= kind :kw-for) (parse-for-statement tokens)
+    (= kind :kw-while) (parse-while-statement tokens)
+    (= kind :kw-do) (parse-do-while-statement tokens)
     (= kind :left-curly) (parse-compound-statement tokens)
     :else (parse-expression-statement tokens)))
 
@@ -237,13 +335,9 @@
   (pp/pprint (parse-from-src "
   int main(void) {
 int a = 1;
- {
-int a = 2;
- {
-int a = 4;
-}
-}
-return 0;
+do {
+    a += 2;
+} while (a < 10);
   }"))
 
   (pp/pprint
