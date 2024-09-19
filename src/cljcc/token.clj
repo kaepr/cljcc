@@ -3,6 +3,7 @@
 (def token-kind
   #{:eof
     :semicolon
+    :comma
 
     ;; brackets
     :left-curly
@@ -132,6 +133,7 @@
    \) :right-paren
    \? :question
    \: :colon
+   \, :comma
    \{ :left-curly
    \} :right-curly
    \= :assignment

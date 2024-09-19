@@ -22,6 +22,8 @@
    [nil "--validate" "Runs semantic analyzer. Does not emit any files."]
    [nil "--tacky" "Runs tacky generation. Does not emit any files."]
    [nil "--codegen" "Runs compiler. Does not emit any files."]
+   ["-c" nil "Generate object file."
+    :id :generate-object-file]
    ["-h" "--help"]])
 
 (defn validate-args [args]

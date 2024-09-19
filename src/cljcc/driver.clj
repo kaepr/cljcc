@@ -33,7 +33,7 @@
       (throw (Exception. ^String (:err output)))
       (log/info (str "Successfully preprocessed file: " preprocessed-file-path)))))
 
-(defn- assemble-step [directory filename]
+(defn- assemble-step [directory filename options]
   (let [file-without-ext (remove-extension filename)
         assembly-file (make-file-name directory file-without-ext "s")
         preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
@@ -45,7 +45,9 @@
         _ (println assembly-output)
         _ (spit assembly-out-file-path assembly-output)
         output-file (str directory "/" file-without-ext)
-        output (handle-sh "gcc" assembly-file "-o" output-file)]
+        output (if (:generate-object-file options)
+                 (handle-sh "gcc" "-c" assembly-file "-o" output-file)
+                 (handle-sh "gcc" assembly-file "-o" output-file))]
     (if (= 1 (:exit output))
       (throw (Exception. ^String (:err output)))
       (log/info (str "Successfully created executable at: " output-file)))))
@@ -103,7 +105,7 @@
                (partial semantic-analyzer-step directory filename)
                (partial tacky-step directory filename)
                (partial compiler-step directory filename)
-               (partial assemble-step directory filename)]]
+               (partial assemble-step directory filename options)]]
     (cond
       (:lex options) (subvec steps 0 3)
       (:parse options) (subvec steps 0 4)
