@@ -4,7 +4,7 @@
    [cljcc.token :as t]
    [clojure.pprint :as pp]))
 
-(declare parse parse-exp parse-statement parse-block expect parse-declaration)
+(declare parse parse-exp parse-statement parse-block expect parse-declaration parse-variable-declaration)
 
 (defn- parse-repeatedly [tokens parse-f end-kind]
   (loop [tokens tokens
@@ -17,7 +17,7 @@
 (defn- parse-optional-expression [[{kind :kind} :as tokens] parse-f end-kind]
   (if (= kind end-kind)
     (let [[_ tokens] (expect end-kind tokens)]
-      [nil tokens]) ; end kind seen, so expression not found
+      [nil tokens])                     ; end kind seen, so expression not found
     (let [[e tokens] (parse-f tokens)
           [_ tokens] (expect end-kind tokens)]
       [e tokens])))
@@ -47,6 +47,12 @@
    :exp-type :variable-exp
    :identifier identifier})
 
+(defn function-call-exp-node [identifier arguments]
+  {:type :exp
+   :exp-type :function-call-exp
+   :identifier identifier
+   :arguments arguments})
+
 (defn unary-exp-node [op v]
   {:type :exp
    :exp-type :unary-exp
@@ -74,6 +80,16 @@
    :middle m
    :right r})
 
+(defn- parse-argument-list [tokens]
+  (let [[e-node tokens] (parse-exp tokens)
+        parse-comma-argument-f (fn [tokens]
+                                 (let [[_ tokens] (expect :comma tokens)
+                                       [e tokens] (parse-exp tokens)]
+                                   [e tokens]))
+        [rest-arguments tokens] (parse-repeatedly tokens parse-comma-argument-f :right-paren)
+        [_ tokens] (expect :right-paren tokens)]
+    [(into [e-node] (vec rest-arguments)) tokens]))
+
 (defn- parse-factor [[{kind :kind :as token} :as tokens]]
   (cond
     (= kind :number) [(constant-exp-node (:literal token)) (rest tokens)]
@@ -83,7 +99,16 @@
     (= kind :left-paren) (let [[e rst] (parse-exp (rest tokens))
                                [_ rst] (expect :right-paren rst)]
                            [e rst])
-    (= kind :identifier) [(variable-exp-node (:literal token)) (rest tokens)]
+    (= kind :identifier) (if (= :left-paren (:kind (second tokens))) ; is a fn call
+                           (let [[{f-name :literal} tokens] (expect :identifier tokens)
+                                 [_ tokens] (expect :left-paren tokens)
+                                 right-paren? (= :right-paren (:kind (first tokens)))]
+                             (if right-paren?
+                               (let [[_ tokens] (expect :right-paren tokens)]
+                                 [(function-call-exp-node f-name []) tokens])
+                               (let [[arguments tokens] (parse-argument-list tokens)]
+                                 [(function-call-exp-node f-name arguments) tokens])))
+                           [(variable-exp-node (:literal token)) (rest tokens)])
     :else (throw (ex-info "Parser Error. Malformed token." {:token token}))))
 
 (defn- parse-exp
@@ -226,7 +251,7 @@
 
 (defn- parse-for-init-statement [[{kind :kind} :as tokens]]
   (if (= kind :kw-int)
-    (parse-declaration tokens)
+    (parse-variable-declaration tokens)
     (parse-optional-expression tokens parse-exp :semicolon)))
 
 (defn- parse-for-statement [tokens]
@@ -270,25 +295,92 @@
     (= kind :left-curly) (parse-compound-statement tokens)
     :else (parse-expression-statement tokens)))
 
+(defn variable-declaration-node
+  ([identifier]
+   {:type :declaration
+    :declaration-type :variable
+    :identifier identifier})
+  ([identifier v]
+   {:type :declaration
+    :declaration-type :variable
+    :identifier identifier
+    :initial v}))
+
+(defn function-declaration-node
+  ([return-type identifier params]
+   {:type :declaration
+    :return-type return-type
+    :declaration-type :function
+    :identifier identifier
+    :parameters params})
+  ([return-type identifier params body]
+   {:type :declaration
+    :return-type return-type
+    :declaration-type :function
+    :identifier identifier
+    :parameters params
+    :body body}))
+
 (defn declaration-node
-  ([identifier] {:type :declaration
-                 :identifier identifier})
-  ([identifier v] {:type :declaration
-                   :identifier identifier
-                   :initial v}))
+  ([dtype identifier] {:type :declaration
+                       :declaration-type dtype
+                       :identifier identifier})
+  ([dtype identifier v] {:type :declaration
+                         :declaration-type dtype
+                         :identifier identifier
+                         :initial v}))
+
+(defn- parse-param-list [tokens]
+  (let [void? (= :kw-void (:kind (first tokens)))]
+    (if void?
+      (let [[_ tokens] (expect :kw-void tokens)
+            [_ tokens] (expect :right-paren tokens)]
+        [[] tokens]) ; void means no parameters
+      (let [[_ tokens] (expect :kw-int tokens)
+            [ident-token tokens] (expect :identifier tokens)
+            parse-comma-f (fn [tokens]
+                            (let [[_ tokens] (expect :comma tokens)
+                                  [_ tokens] (expect :kw-int tokens)
+                                  [ident-token tokens] (expect :identifier tokens)]
+                              [ident-token tokens]))
+            [rest-params tokens] (parse-repeatedly tokens parse-comma-f :right-paren)
+            [_ tokens] (expect :right-paren tokens)
+            map-param-f (fn [p]
+                          {:parameter-name (:literal p)
+                           :parameter-type (:kind p)})
+            params (map map-param-f (into [ident-token] (vec rest-params)))]
+        [params tokens]))))
+
+(defn- parse-function-declaration [tokens]
+  (let [[{ret-kind :kind} tokens] (expect :kw-int tokens)
+        [{fn-name :literal} tokens] (expect :identifier tokens)
+        [_ tokens] (expect :left-paren tokens)
+        [params tokens] (parse-param-list tokens)
+        semicolon? (= :semicolon (:kind (first tokens)))]
+    (if semicolon?
+      (let [[_ tokens] (expect :semicolon tokens)]
+        [(function-declaration-node (keyword->type ret-kind) fn-name params) tokens])
+      (let [[body tokens] (parse-block tokens)]
+        [(function-declaration-node (keyword->type ret-kind) fn-name params body) tokens]))))
+
+(defn- parse-variable-declaration [tokens]
+  (let [[_ tokens] (expect :kw-int tokens)
+        [ident-token tokens] (expect :identifier tokens)
+        [{kind :kind} :as tokens] tokens]
+    (cond
+      (= kind :semicolon) (let [[_ tokens] (expect :semicolon tokens)]
+                            [(variable-declaration-node (:literal ident-token)) tokens])
+      (= kind :assignment) (let [[_ tokens] (expect :assignment tokens)
+                                 [exp-node tokens] (parse-exp tokens)
+                                 [_ tokens] (expect :semicolon tokens)]
+                             [(declaration-node (:literal ident-token) exp-node) tokens])
+      :else (throw (ex-info "Parser error. Not able  to parse variable declaration." {})))))
 
 (defn- parse-declaration [tokens]
-  (let [[_ rst] (expect :kw-int tokens)
-        [ident-token rst] (expect :identifier rst)
-        [{kind :kind} :as tokens] rst]
-    (cond
-      (= kind :semicolon) (let [[_ rst] (expect :semicolon tokens)]
-                            [(declaration-node (:literal ident-token)) rst])
-      (= kind :assignment) (let [[_ rst] (expect :assignment tokens)
-                                 [exp-node rst] (parse-exp rst)
-                                 [_ rst] (expect :semicolon rst)]
-                             [(declaration-node (:literal ident-token) exp-node) rst])
-      :else (throw (ex-info "Parser error. Declaration error parsing." {})))))
+  (let [fn? (= :left-paren (:kind (nth tokens 2)))]
+    (if fn?
+      (parse-function-declaration tokens)
+      (parse-variable-declaration tokens))))
 
 (defn- parse-block-item [[token :as tokens]]
   (if (= :kw-int (:kind token))
@@ -301,24 +393,10 @@
         [_ tokens] (expect :right-curly tokens)]
     [block-items tokens]))
 
-(defn- parse-function [tokens]
-  (let [[fn-type-token rst] (expect :kw-int tokens)
-        [fn-identifier-token rst] (expect :identifier rst)
-        [_ rst] (expect :left-paren rst)
-        [fn-parameter-token rst] (expect :kw-void rst)
-        [_ rst] (expect :right-paren rst)
-        [block-items rst] (parse-block rst)]
-    [{:type :function
-      :return-type (keyword->type (:kind fn-type-token))
-      :identifier (:literal fn-identifier-token)
-      :parameters (:kind fn-parameter-token)
-      :body block-items}
-     rst]))
-
 (defn- parse-program [tokens]
-  (let [[ast rst] (parse-function tokens)
-        _ (expect :eof rst)]
-    [ast]))
+  (let [[fn-declaratrions tokens] (parse-repeatedly tokens parse-function-declaration :eof)
+        _ (expect :eof tokens)]
+    fn-declaratrions))
 
 (defn parse [tokens]
   (-> tokens
@@ -332,13 +410,23 @@
 
 (comment
 
+  (pp/pprint (l/lex "int main(void);"))
+
   (pp/pprint (parse-from-src "
-  int main(void) {
-int a = 1;
-do {
-    a += 2;
-} while (a < 10);
-  }"))
+int main(void) {
+int var0;
+var0 = 2;
+return var0;
+}
+  "))
+
+  (pp/pprint (parse-from-src "
+
+int main(void) {
+return !three();
+}
+
+  "))
 
   (pp/pprint
    (l/lex
