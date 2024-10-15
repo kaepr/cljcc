@@ -8,56 +8,114 @@
   ([] (unique-identifier "analyzer"))
   ([identifier] (u/create-identifier! identifier)))
 
+(defn- copy-identifier-map
+  "Returns a copy of the identifier map.
+
+  Sets :from-current-block as false for every entry. Used when going into a inner scope."
+  [identifier-map]
+  (zipmap (keys identifier-map)
+          (map (fn [m]
+                 (update m :from-current-block (fn [_] false)))
+               (vals identifier-map))))
+
 (declare resolve-block)
 
-(defn- resolve-exp [e mp]
+(defn- resolve-exp [e identifier-map]
   (condp = (:exp-type e)
     :constant-exp e
-    :variable-exp (if (contains? mp (:identifier e))
-                    (p/variable-exp-node (:name (get mp (:identifier e))))
+    :variable-exp (if (contains? identifier-map (:identifier e))
+                    (p/variable-exp-node (:name (get identifier-map (:identifier e))))
                     (throw (ex-info "Undeclared variable seen." {:variable e})))
     :assignment-exp (let [left (:left e)
                           right (:right e)
                           op (:assignment-operator e)
                           left-var? (= :variable-exp (:exp-type left))]
                       (if left-var?
-                        (p/assignment-exp-node (resolve-exp left mp)
-                                               (resolve-exp right mp)
+                        (p/assignment-exp-node (resolve-exp left identifier-map)
+                                               (resolve-exp right identifier-map)
                                                op)
                         (throw (ex-info "Invalid lvalue." {:lvalue e}))))
-    :binary-exp (p/binary-exp-node (resolve-exp (:left e) mp)
-                                   (resolve-exp (:right e) mp)
+    :binary-exp (p/binary-exp-node (resolve-exp (:left e) identifier-map)
+                                   (resolve-exp (:right e) identifier-map)
                                    (:binary-operator e))
-    :unary-exp (p/unary-exp-node (:unary-operator e) (resolve-exp (:value e) mp))
-    :conditional-exp (p/conditional-exp-node (resolve-exp (:left e) mp)
-                                             (resolve-exp (:middle e) mp)
-                                             (resolve-exp (:right e) mp))
+    :unary-exp (p/unary-exp-node (:unary-operator e) (resolve-exp (:value e) identifier-map))
+    :conditional-exp (p/conditional-exp-node (resolve-exp (:left e) identifier-map)
+                                             (resolve-exp (:middle e) identifier-map)
+                                             (resolve-exp (:right e) identifier-map))
+    :function-call-exp (let [fn-name (:identifier e)
+                             args (:arguments e)]
+                         (if (contains? identifier-map fn-name)
+                           (p/function-call-exp-node (:new-name (get identifier-map fn-name))
+                                                     (map #(resolve-exp % identifier-map) args))
+                           (throw (ex-info "Undeclared function !" {:function-name fn-name}))))
     (throw (ex-info "Analyzer error. Invalid expression type" {:exp e}))))
 
-(defn- resolve-optional-exp [e var-mp]
+(defn- resolve-optional-exp [e identifier-map]
   (if (nil? e)
     e
-    (resolve-exp e var-mp)))
+    (resolve-exp e identifier-map)))
 
-(defn- resolve-declaration [d mp]
-  (if (and (contains? mp (:identifier d)) (:from-current-block (get mp (:identifier d))))
+(defn- resolve-variable-declaration
+  "Resolves variable declarations.
+
+  Ensures variable not declared twice in the current scope."
+  [{:keys [identifier initial] :as d} identifier-map]
+  (if (and (contains? identifier-map identifier)
+           (:from-current-block (get identifier-map identifier)))
     (throw (ex-info "Analyzer error. Duplicate variable declaration." {:declaration d}))
-    (let [ident (:identifier d)
-          unique-name (unique-identifier ident)
-          updated-mp (assoc mp ident {:name unique-name
-                                      :from-current-block true})
-          init (when (:initial d) (resolve-exp (:initial d) updated-mp))]
-      (if init
-        {:declaration (p/declaration-node unique-name init)
-         :variable-map updated-mp}
-        {:declaration (p/declaration-node unique-name)
-         :variable-map updated-mp}))))
+    (let [unique-name (unique-identifier identifier)
+          updated-identifier-map (assoc identifier-map identifier {:name unique-name
+                                                                   :from-current-block true
+                                                                   :has-linkage false})
+          init-value (when initial (resolve-exp initial updated-identifier-map))]
+      {:declaration (p/variable-declaration-node unique-name init-value)
+       :identifier-map updated-identifier-map})))
 
-(defn- copy-variable-map [var-mp]
-  (zipmap (keys var-mp)
-          (map (fn [m]
-                 (update m :from-current-block (fn [_] false)))
-               (vals var-mp))))
+(defn- resolve-parameter [{:keys [identifier] :as param} identifier-map]
+  (if (and (contains? identifier-map identifier)
+           (:from-current-block (get identifier-map identifier)))
+    (throw (ex-info "Analyzer error. Parameter name duplicated." {:parameter param}))
+    (let [unique-name (unique-identifier identifier)
+          updated-identifier-map (assoc identifier-map identifier {:name unique-name
+                                                                   :from-current-block true
+                                                                   :has-linkage false})]
+      {:parameter (p/variable-declaration-node unique-name)
+       :identifier-map updated-identifier-map})))
+
+(defn- resolve-parameters [params identifier-map]
+  (reduce (fn [acc p]
+            (let [{:keys [parameter identifier-map]} (resolve-parameter p (:identifier-map acc))]
+              {:parameters (conj (:parameters acc) parameter)
+               :identifier-map identifier-map}))
+          {:parameters [] :identifier-map identifier-map}
+          params))
+
+(defn- resolve-function-declaration
+  "Resolve function declaration.
+
+  Ensures functions not declared twice in current scope with incorrect linkage."
+  [{:keys [identifier parameters return-type body] :as d} identifier-map]
+  (let [prev-entry (get identifier-map identifier)
+        illegally-redeclared? (and (contains? identifier-map identifier)
+                                   (:from-current-scope prev-entry)
+                                   (not (:has-linkage prev-entry)))
+        _ (when illegally-redeclared?
+            (throw (ex-info "Analzer Error. Function duplicate declaration." {:declaration d})))
+        updated-identifier-map (assoc identifier-map identifier {:new-name identifier
+                                                                 :name identifier
+                                                                 :from-current-scope true
+                                                                 :has-linkage true})
+        inner-map (copy-identifier-map updated-identifier-map)
+        {new-params :parameters, inner-map :identifier-map} (resolve-parameters parameters inner-map)
+        new-body (when body (resolve-block body inner-map))]
+    {:declaration (p/function-declaration-node return-type identifier new-params (:block new-body))
+     :identifier-map updated-identifier-map}))
+
+(defn- resolve-declaration [{:keys [declaration-type] :as d} identifier-map]
+  (condp = declaration-type
+    :variable (resolve-variable-declaration d identifier-map)
+    :function (resolve-function-declaration d identifier-map)
+    (throw (ex-info "Analyzer Error. Invalid declaration type." {:declaration d}))))
 
 (defn- resolve-for-init [for-init var-mp]
   (if (= (:type for-init) :declaration)
@@ -80,11 +138,11 @@
                                    (resolve-statement (:body s) mp))
     :do-while (p/do-while-statement-node (resolve-exp (:condition s) mp)
                                          (resolve-statement (:body s) mp))
-    :for (let [new-var-map (copy-variable-map mp)
-               for-init (resolve-for-init (:init s) new-var-map)
+    :for (let [new-identifier-map (copy-identifier-map mp)
+               for-init (resolve-for-init (:init s) new-identifier-map)
                new-var-map (if (:declaration for-init)
-                             (:variable-map for-init)
-                             new-var-map) ; updates new-var-map so that include possible
+                             (:identifier-map for-init)
+                             new-identifier-map) ; updates new-identifier-map so that include possible
                                           ; variable declaration
                for-init (if (:declaration for-init)
                           (:declaration for-init)
@@ -93,35 +151,35 @@
                post (resolve-optional-exp (:post s) new-var-map)
                body (resolve-statement (:body s) new-var-map)]
            (p/for-statement-node for-init condition post body))
-    :compound (let [updated-mp (copy-variable-map mp)]
+    :compound (let [updated-mp (copy-identifier-map mp)]
                 (p/compound-statement-node (:block (resolve-block (:block s) updated-mp))))
     :empty (p/empty-statement-node)
     (throw (ex-info "Analyzer error. Invalid statement." {:statement s}))))
 
-(defn- resolve-block-item [item mp]
+(defn- resolve-block-item [item identifier-map]
   (let [type (:type item)]
     (cond
-      (= type :declaration) (let [v (resolve-declaration item mp)]
+      (= type :declaration) (let [v (resolve-declaration item identifier-map)]
                               {:block-item (:declaration v)
-                               :variable-map (:variable-map v)})
-      (= type :statement) {:block-item (resolve-statement item mp)
-                           :variable-map mp}
+                               :identifier-map (:identifier-map v)})
+      (= type :statement) {:block-item (resolve-statement item identifier-map)
+                           :identifier-map identifier-map}
       :else (throw (ex-info "Analyzer Error. Invalid statement/declaration." {item item})))))
 
 (defn- resolve-block
   ([block]
    (resolve-block block {}))
-  ([block var-mp]
+  ([block identifier-map]
    (reduce (fn [acc block-item]
-             (let [v (resolve-block-item block-item (:variable-map acc))]
+             (let [v (resolve-block-item block-item (:identifier-map acc))]
                {:block (conj (:block acc) (:block-item v))
-                :variable-map (:variable-map v)}))
+                :identifier-map (:identifier-map v)}))
            {:block []
-            :variable-map var-mp}
+            :identifier-map identifier-map}
            block)))
 
-(defn- annotate-label [n l]
-  (assoc n :label l))
+(defn- annotate-label [m l]
+  (assoc m :label l))
 
 (defn- label-statement
   ([s]
@@ -164,7 +222,7 @@
        (= s-type :empty) s
        :else (throw (ex-info "invalid statement reached during loop labelling." {}))))))
 
-(defn- resolve-loop-labels [body]
+(defn- resolve-loop-label [body]
   (let [f (fn [item]
             (if (= :statement (:type item))
               (label-statement item)
@@ -172,24 +230,14 @@
         new-body (map f body)]
     new-body))
 
-(defn- validate-function [f]
-  (let [body (resolve-loop-labels (:block (resolve-block (:body f))))]
-    (assoc f :body body)))
-
-(comment
-
-  (resolve-block
-   [{:type :declaration
-     :identifier "a",
-     :initial {:type :exp, :exp-type :constant-exp, :value 1}}
-    {:type :statement,
-     :statement-type :return,
-     :value {:type :exp, :exp-type :constant-exp, :value 0}}])
-
-  ())
+(defn- validate-loop-labels [{block :block}]
+  (map (fn [b]
+         (assoc b :body (resolve-loop-label (:body b)))) block))
 
 (defn validate [ast]
-  (map validate-function ast))
+  (-> ast
+      resolve-block
+      validate-loop-labels))
 
 (defn- validate-from-src [s]
   (u/reset-counter!)
@@ -202,23 +250,15 @@
 
   (pp/pprint
    (validate-from-src
-    "int main (void) {
-int i = 0;
-    int j = 0;
-    int k = 1;
-    for (i = 100 ;;) {
-        int i = 1;
-        int j = i + k;
-        k = j;
-    }
+    "
+int main(void) {
+int foo(void);
+return foo;
+}
 
-    return k == 101 && i == 0 && j == 0;
-}"))
-
-  (pp/pprint
-   (validate-from-src
-    "int main (void) {
-int x = 1 + x;
-}"))
+int foo(void) {
+return 1;
+}
+"))
 
   ())

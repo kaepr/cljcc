@@ -321,15 +321,6 @@
     :parameters params
     :body body}))
 
-(defn declaration-node
-  ([dtype identifier] {:type :declaration
-                       :declaration-type dtype
-                       :identifier identifier})
-  ([dtype identifier v] {:type :declaration
-                         :declaration-type dtype
-                         :identifier identifier
-                         :initial v}))
-
 (defn- parse-param-list [tokens]
   (let [void? (= :kw-void (:kind (first tokens)))]
     (if void?
@@ -347,6 +338,7 @@
             [_ tokens] (expect :right-paren tokens)
             map-param-f (fn [p]
                           {:parameter-name (:literal p)
+                           :identifier (:literal p)
                            :parameter-type (:kind p)})
             params (map map-param-f (into [ident-token] (vec rest-params)))]
         [params tokens]))))
@@ -373,7 +365,7 @@
       (= kind :assignment) (let [[_ tokens] (expect :assignment tokens)
                                  [exp-node tokens] (parse-exp tokens)
                                  [_ tokens] (expect :semicolon tokens)]
-                             [(declaration-node (:literal ident-token) exp-node) tokens])
+                             [(variable-declaration-node (:literal ident-token) exp-node) tokens])
       :else (throw (ex-info "Parser error. Not able  to parse variable declaration." {})))))
 
 (defn- parse-declaration [tokens]
@@ -421,11 +413,7 @@ return var0;
   "))
 
   (pp/pprint (parse-from-src "
-
-int main(void) {
-return !three();
-}
-
+int add(int x, int y);
   "))
 
   (pp/pprint
