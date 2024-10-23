@@ -13,6 +13,12 @@
   run-main {:doc "Run main"
             :task (apply clojure "-M -m cljcc.cljcc" *command-line-args*)}
 
+  nrepl {:doc "Starts a nrepl session."
+         :task (apply clojure "-M:nrepl" *command-line-args*)}
+
+  storm {:doc "Starts a nrepl session with storm debugger."
+         :task (apply clojure "-M:storm" *command-line-args*)}
+
   build-uberjar {:doc "Builds uberjar"
                  :task (when (seq (fs/modified-since "target/cljcc"
                                                      ["src" "build.clj" "deps.edn" "test" "resources"]))
