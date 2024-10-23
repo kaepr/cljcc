@@ -96,18 +96,27 @@
   Ensures functions not declared twice in current scope with incorrect linkage."
   [{:keys [identifier parameters return-type body] :as d} identifier-map]
   (let [prev-entry (get identifier-map identifier)
+        already-declared-var? (and (contains?  identifier-map identifier)
+                                   (:from-current-block (get identifier-map identifier))
+                                   (not (:has-linkage prev-entry)))
         illegally-redeclared? (and (contains? identifier-map identifier)
                                    (:from-current-scope prev-entry)
                                    (not (:has-linkage prev-entry)))
+        inside-function-definition? (:inside-function-definition (:inside-inner-scope identifier-map))
+        _ (when already-declared-var?
+           (throw (ex-info "Analyzer Error. Variable already declared in same scope." {:declaration d})))
         _ (when illegally-redeclared?
-            (throw (ex-info "Analzer Error. Function duplicate declaration." {:declaration d})))
+            (throw (ex-info "Analyzer Error. Function duplicate declaration." {:declaration d})))
         updated-identifier-map (assoc identifier-map identifier {:new-name identifier
                                                                  :name identifier
+                                                                 :from-current-block true
                                                                  :from-current-scope true
                                                                  :has-linkage true})
         inner-map (copy-identifier-map updated-identifier-map)
         {new-params :parameters, inner-map :identifier-map} (resolve-parameters parameters inner-map)
-        new-body (when body (resolve-block body inner-map))]
+        _ (when (and body inside-function-definition?)
+            (throw (ex-info "Analyzer Error. Nested function definition not allowed." {:declaration d})))
+        new-body (when body (resolve-block body (assoc inner-map :inside-inner-scope {:inside-function-definition true})))]
     {:declaration (p/function-declaration-node return-type identifier new-params (:block new-body))
      :identifier-map updated-identifier-map}))
 
@@ -252,6 +261,7 @@
    (validate-from-src
     "
 int main(void) {
+int foo = 1;
 int foo(void);
 return foo;
 }
