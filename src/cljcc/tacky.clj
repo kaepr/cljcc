@@ -114,6 +114,12 @@
   {:type :label
    :identifier identifier})
 
+(defn- fun-call-instruction [identifier arguments dst]
+  {:type :fun-call
+   :identifier identifier
+   :arguments arguments
+   :dst dst})
+
 ;;;; Expression handlers
 
 (declare expression-handler)
@@ -125,7 +131,7 @@
   (let [inner (expression-handler (:value e))
         src (:val inner)
         op (unary-operator (:unary-operator e))
-        dst (variable (str "var_" op))
+        dst (variable (str "unary_result_" op))
         instruction (unary-instruction op src dst)]
     {:val dst
      :instructions (flatten [(:instructions inner) instruction])}))
@@ -136,7 +142,7 @@
         src1 (:val e1)
         src2 (:val e2)
         op (binary-operator (:binary-operator e))
-        dst (variable (str "var_" op))
+        dst (variable (str "binary_result_" op))
         instruction (binary-instruction op src1 src2 dst)]
     {:val dst
      :instructions (flatten [(:instructions e1) (:instructions e2) instruction])}))
@@ -215,20 +221,28 @@
                      (copy-instruction (:val else-e) res)
                      (label-instruction end-label)])}))
 
+(defn- function-call-exp-handler [{identifier :identifier arguments :arguments}]
+  (let [arg-exps (map expression-handler arguments)
+        dst (variable (str "function_call_result_" identifier))
+        fn-instruction (fun-call-instruction identifier (map #(:val %) arg-exps) dst)]
+    {:val dst
+     :instructions (flatten [(map #(:instructions %) arg-exps) fn-instruction])}))
+
 (defn- expression-handler [e]
   (when-let [exp-type (:exp-type e)]
-    (cond
-      (= exp-type :constant-exp) (constant-expr-handler e)
-      (= exp-type :unary-exp) (unary-expr-handler e)
-      (= exp-type :binary-exp) (let [op (:binary-operator e)]
-                                 (condp = op
-                                   :logical-and (logical-and-handler e)
-                                   :logical-or (logical-or-handler e)
-                                   (binary-expr-handler e)))
-      (= exp-type :variable-exp) {:val (parsed-var->tacky-var e)}
-      (= exp-type :assignment-exp) (assignment-exp-handler e)
-      (= exp-type :conditional-exp) (conditional-exp-handler e)
-      :else (throw (ex-info "Tacky error. Invalid expression." {e e})))))
+    (condp = exp-type
+      :constant-exp (constant-expr-handler e)
+      :unary-exp (unary-expr-handler e)
+      :binary-exp (let [op (:binary-operator e)]
+                    (condp = op
+                      :logical-and (logical-and-handler e)
+                      :logical-or (logical-or-handler e)
+                      (binary-expr-handler e)))
+      :variable-exp {:val (parsed-var->tacky-var e)}
+      :assignment-exp (assignment-exp-handler e)
+      :conditional-exp (conditional-exp-handler e)
+      :function-call-exp (function-call-exp-handler e)
+      (throw (ex-info "Tacky error. Invalid expression." {e e})))))
 
 (defn- exp-instructions [exp]
   (expression-handler exp))
@@ -360,12 +374,24 @@
                (remove nil?))]
     (conj (vec v) (return-instruction (constant 0)))))
 
-(defn tacky-generate [ast]
-  (map (fn [f]
-         (-> f
-             (assoc :instructions (function-body->tacky-instructions (:body f)))
-             (dissoc :body)))
-       ast))
+(defn- function-definition->tacky-function [function-definition]
+  (let [add-return (fn [xs] (conj (vec xs) (return-instruction (constant 0))))
+        instructions (->> function-definition
+                          :body
+                          (remove nil?)
+                          (map block-item->tacky-instruction)
+                          flatten
+                          (remove nil?)
+                          add-return)]
+    (-> function-definition
+        (dissoc :body)
+        (assoc :instructions instructions))))
+
+(defn tacky-generate [{ast :block}]
+  (let [defined? (fn [x] (seq (:body x)))]
+   (->> ast
+       (filter defined?)
+       (map function-definition->tacky-function))))
 
 (defn tacky-from-src [src]
   (-> src
@@ -374,40 +400,20 @@
       a/validate
       tacky-generate))
 
-(def ex
-  {:type :function,
-   :return-type "int",
-   :identifier "main",
-   :parameters :kw-void,
-   :body
-   [{:type :declaration,
-     :identifier "a.0",
-     :initial {:type :exp, :exp-type :constant-exp, :value 3}}
-    {:type :statement,
-     :statement-type :compound,
-     :block
-     [{:type :declaration,
-       :identifier "a.1",
-       :initial
-       {:type :exp,
-        :exp-type :assignment-exp,
-        :assignment-operator :assignment,
-        :left {:type :exp, :exp-type :variable-exp, :identifier "a.1"},
-        :right {:type :exp, :exp-type :constant-exp, :value 4}}}]}
-    {:type :statement,
-     :statement-type :return,
-     :value {:type :exp, :exp-type :variable-exp, :identifier "a.0"}}]})
-
 (comment
 
   (pp/pprint
    (tacky-from-src
-    "int main (void) {
-int a = 3;
-{
-  int a = a = 4;
+    "
+int foo(int a) {
+return a + 1;
 }
-return a;
+
+int main (void) {
+int y = 5;
+int x = foo(y + 10);
+return x;
+
 }"))
 
   (pp/pprint
