@@ -402,36 +402,12 @@
 
 (comment
 
-  (pp/pprint (l/lex "int main(void);"))
-
   (pp/pprint (parse-from-src "
 int main(void) {
-int var0;
-var0 = 2;
-return var0;
+if (1 < 0) {
+int x = 1;
+}
 }
   "))
-
-  (pp/pprint (parse-from-src "
-int add(int x, int y);
-  "))
-
-  (pp/pprint
-   (l/lex
-    "int main(void) {return 1 + 2;}"))
-
-  (pp/pprint
-   (l/lex "
-  int main(void) {
-    return 2;
-  }"))
-
-  (parse "int main(void) {
-   return -(((((10)))));
-   }")
-
-  (pp/pprint (parse "int main(void) {
-   return 1 & 2 + 6 & 6;
-   }"))
 
   ())

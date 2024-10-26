@@ -104,7 +104,7 @@
                                    (not (:has-linkage prev-entry)))
         inside-function-definition? (:inside-function-definition (:inside-inner-scope identifier-map))
         _ (when already-declared-var?
-           (throw (ex-info "Analyzer Error. Variable already declared in same scope." {:declaration d})))
+            (throw (ex-info "Analyzer Error. Variable already declared in same scope." {:declaration d})))
         _ (when illegally-redeclared?
             (throw (ex-info "Analyzer Error. Function duplicate declaration." {:declaration d})))
         updated-identifier-map (assoc identifier-map identifier {:new-name identifier
@@ -165,15 +165,14 @@
     :empty (p/empty-statement-node)
     (throw (ex-info "Analyzer error. Invalid statement." {:statement s}))))
 
-(defn- resolve-block-item [item identifier-map]
-  (let [type (:type item)]
-    (cond
-      (= type :declaration) (let [v (resolve-declaration item identifier-map)]
-                              {:block-item (:declaration v)
-                               :identifier-map (:identifier-map v)})
-      (= type :statement) {:block-item (resolve-statement item identifier-map)
-                           :identifier-map identifier-map}
-      :else (throw (ex-info "Analyzer Error. Invalid statement/declaration." {item item})))))
+(defn- resolve-block-item [{:keys [type] :as item} identifier-map]
+  (condp = type
+    :declaration (let [v (resolve-declaration item identifier-map)]
+                   {:block-item (:declaration v)
+                    :identifier-map (:identifier-map v)})
+    :statement {:block-item (resolve-statement item identifier-map)
+                :identifier-map identifier-map}
+    (throw (ex-info "Analyzer Error. Invalid statement/declaration." {item item}))))
 
 (defn- resolve-block
   ([block]
@@ -243,10 +242,163 @@
   (map (fn [b]
          (assoc b :body (resolve-loop-label (:body b)))) block))
 
+(defn- typecheck-exp
+  "Returns the expression itself, after typechecking all subexpressions."
+  [{:keys [exp-type] :as e} decl-name->symbol]
+  (condp = exp-type
+    :constant-exp e
+    :variable-exp (let [identifier (:identifier e)
+                        variable-type (:variable-type (get decl-name->symbol identifier))
+                        _ (when  (not (= :int variable-type))
+                            (throw (ex-info "Analyzer Error. Function name used as variable." {:exp e})))]
+                    e)
+    :assignment-exp (do
+                      (typecheck-exp (:left e) decl-name->symbol)
+                      (typecheck-exp (:right e) decl-name->symbol)
+                      e)
+    :binary-exp (do
+                  (typecheck-exp (:left e) decl-name->symbol)
+                  (typecheck-exp (:right e) decl-name->symbol)
+                  e)
+    :unary-exp (do
+                 (typecheck-exp (:value e) decl-name->symbol)
+                 e)
+    :conditional-exp (do
+                       (typecheck-exp (:left e) decl-name->symbol)
+                       (typecheck-exp (:right e) decl-name->symbol)
+                       (typecheck-exp (:middle e) decl-name->symbol)
+                       e)
+    :function-call-exp (let [symbol (decl-name->symbol (:identifier e))
+                             _ (when (= :int (:variable-type symbol))
+                                 (throw (ex-info "Analyzer Error. Variable used as function name." {:exp e})))
+                             _ (when (not (= (count (:arguments e)) (:param-count symbol)))
+                                 (throw (ex-info "Analyzer Error. Function called with the wrong number of arguments." {:exp e})))
+                             _ (map #(typecheck-exp % decl-name->symbol) (:arguments e))]
+                         e)
+    (throw (ex-info "Analyzer error. Invalid expression type passed to typechecker." {:exp e}))))
+
+(defn- variable-symbol [variable-type]
+  {:variable-type variable-type})
+
+(defn- function-symbol [param-count defined?]
+  {:param-count param-count
+   :defined? defined?})
+
+(defn- add-parameters [params decl-name->symbol]
+  (if (= 0 (count params))
+    decl-name->symbol
+    (apply assoc
+           decl-name->symbol
+             (flatten (map (fn [p] [(:identifier p) (variable-symbol :int)]) params)))))
+
+(declare typecheck-block)
+
+(defn- typecheck-declaration [{:keys [declaration-type identifier] :as d} decl-name->symbol]
+  (condp = declaration-type
+    :variable (let [updated-decl-name->symbol (assoc decl-name->symbol identifier (variable-symbol :int))
+                    _ (when (:initial d) (typecheck-exp (:initial d) updated-decl-name->symbol))]
+                {:declaration d
+                 :decl-name->symbol updated-decl-name->symbol})
+    :function (let [param-count (count (:parameters d))
+                    has-body? (not (empty? (:body d)))
+                    previously-declared? (contains? decl-name->symbol identifier)
+                    _ (when previously-declared?
+                        (let [old-symbol (get decl-name->symbol identifier)
+                              _ (when (not= param-count (:param-count old-symbol))
+                                  (throw (ex-info "Analyzer Error. Incompatible function declarations." {:declaration d})))
+                              _ (when (and (:defined? old-symbol) has-body?)
+                                  (throw (ex-info "Analyzer Error. Function is defined more than once." {:declaration d})))]))
+                    updated-decl-name->symbol (assoc decl-name->symbol
+                                                     identifier
+                                                     (function-symbol param-count (or (:defined? (get decl-name->symbol identifier)) has-body?)))]
+                (if has-body?
+                  (let [with-parameters-symbols (add-parameters (:parameters d) updated-decl-name->symbol)
+                        with-body-symbols (typecheck-block (:body d) with-parameters-symbols)]
+                   {:declaration d
+                    :decl-name->symbol (:decl-name->symbol with-body-symbols)})
+                  {:declaration d
+                   :decl-name->symbol updated-decl-name->symbol}))
+    (throw (ex-info "Analyzer Error. Invalid declaration for typechecker." {:declaration d}))))
+
+(defn- typecheck-optional-expression [e decl-name->symbol]
+  (if (nil? e)
+    e
+    (typecheck-exp e decl-name->symbol)))
+
+
+(defn- typecheck-for-init [for-init decl-name->symbol]
+  (if (= (:type for-init) :declaration)
+    (typecheck-declaration for-init decl-name->symbol)
+    (typecheck-optional-expression for-init decl-name->symbol)))
+
+(defn- typecheck-statement [{:keys [statement-type] :as s} decl-name->symbol]
+  (condp = statement-type
+    :return (do
+              (typecheck-exp (:value s) decl-name->symbol)
+              s)
+    :expression (do
+                  (typecheck-exp (:value s) decl-name->symbol)
+                  s)
+    :if (if (:else-statement s)
+          (do
+            (typecheck-exp (:condition s) decl-name->symbol)
+            (typecheck-statement (:then-statement s) decl-name->symbol)
+            (typecheck-statement (:else-statement s) decl-name->symbol)
+            s)
+          (do
+            (typecheck-exp (:condition s) decl-name->symbol)
+            (typecheck-statement (:then-statement s) decl-name->symbol)
+            s))
+    :break s
+    :continue s
+    :while (do
+             (typecheck-exp (:condition s) decl-name->symbol)
+             (typecheck-statement (:body s) decl-name->symbol)
+             s)
+    :do-while (do
+                (typecheck-exp (:condition s) decl-name->symbol)
+                (typecheck-statement (:body s) decl-name->symbol)
+                s)
+    :for (let [f-init (typecheck-for-init (:init s) decl-name->symbol)
+               updated-symbols (if (:declaration f-init)
+                                 (:decl-name->symbol f-init)
+                                 decl-name->symbol)
+               _ (typecheck-optional-expression (:condition s) updated-symbols)
+               _ (typecheck-optional-expression (:post s) updated-symbols)
+               _ (typecheck-statement (:body s) updated-symbols)]
+           s)
+    :compound (do
+                (typecheck-block (:block s) decl-name->symbol)
+                s)
+    :empty s
+    (throw (ex-info "Analyzer Error. Invalid statement type in typechecker." {:statement s}))))
+
+(defn- typecheck-item [{:keys [type] :as item} decl-name->symbol]
+  (condp = type
+    :declaration (let [v (typecheck-declaration item decl-name->symbol)]
+                   {:block-item (:declaration v)
+                    :decl-name->symbol (:decl-name->symbol v)})
+    :statement {:block-item (typecheck-statement item decl-name->symbol)
+                :decl-name->symbol decl-name->symbol}
+    (throw (ex-info "Analyzer Error. Invalid statement/declaration." {item item}))))
+
+(defn- typecheck-block
+  ([block]
+   (typecheck-block block {}))
+  ([block decl-name->symbol]
+   (reduce (fn [acc item]
+             (let [v (typecheck-item item (:decl-name->symbol acc))]
+               {:block (conj (:block acc) (:block-item v))
+                :decl-name->symbol (:decl-name->symbol v)}))
+           {:block []
+            :decl-name->symbol decl-name->symbol}
+           block)))
+
 (defn validate [ast]
   (-> ast
       resolve-block
-      validate-loop-labels))
+      validate-loop-labels
+      typecheck-block))
 
 (defn- validate-from-src [s]
   (u/reset-counter!)
@@ -260,14 +412,12 @@
   (pp/pprint
    (validate-from-src
     "
-int main(void) {
-int foo = 1;
 int foo(void);
-return foo;
+int main(void) {
+return foo();
 }
-
 int foo(void) {
-return 1;
+return 3;
 }
 "))
 
