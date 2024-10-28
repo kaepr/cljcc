@@ -13,7 +13,7 @@
    {:type :variable
     :value (u/create-identifier! (str identifier))}))
 
-(defn- parsed-var->tacky-var [v]
+(defn parsed-var->tacky-var [v]
   {:type :variable
    :value (:identifier v)})
 
@@ -366,14 +366,6 @@
     :declaration (declaration->tacky-instruction item)
     (throw (ex-info "Tacky error. Invalid block item." {:item item}))))
 
-(defn- function-body->tacky-instructions [body]
-  (let [v (->> body
-               (remove nil?)
-               (map block-item->tacky-instruction)
-               flatten
-               (remove nil?))]
-    (conj (vec v) (return-instruction (constant 0)))))
-
 (defn- function-definition->tacky-function [function-definition]
   (let [add-return (fn [xs] (conj (vec xs) (return-instruction (constant 0))))
         instructions (->> function-definition
@@ -402,7 +394,6 @@
 
 (comment
 
-  (pp/pprint
    (tacky-from-src
     "
 int foo(int a) {
@@ -411,10 +402,10 @@ return a + 1;
 
 int main (void) {
 int y = 5;
-int x = foo(y + 10);
+int x = foo(10);
 return x;
 
-}"))
+}")
 
   (pp/pprint
    (tacky-generate

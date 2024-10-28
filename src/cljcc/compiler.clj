@@ -5,7 +5,7 @@
             [cljcc.lexer :as l]
             [cljcc.analyzer :as a]))
 
-(def registers #{:ax :dx :r10 :r11 :cx :cl})
+(def registers #{:ax :dx :di :si :r8 :r9 :r10 :r11 :cx :cl})
 
 (def cond-codes #{:e :ne :g :ge :l :le})
 
@@ -63,36 +63,52 @@
   {:op :allocate-stack
    :value v})
 
+(defn- deallocate-stack-instruction [v]
+  {:op :deallocate-stack
+   :value v})
+
+(defn- push-instruction [operand]
+  {:op :push
+   :operand operand})
+
+(defn- call-instruction [identifier]
+  {:op :call
+   :identifier identifier})
+
 (defn- ret-instruction []
   {:op :ret})
 
 ;;;; Operands
 
+;; TODO: Cleanup :operand key
+
 (defn- imm-operand [v]
   {:operand :imm
+   :operand-type :imm
    :value v})
 
 (defn- reg-operand [reg]
   {:pre [(contains? registers reg)]}
   {:operand :reg
+   :operand-type :reg
    :register reg})
 
 (defn- stack-operand [v]
   {:operand :stack
+   :operand-type :stack
    :value v})
 
 (defn- pseudo-operand [identifier]
   {:operand :pseudo
+   :operand-type :pseudo
    :identifier identifier})
 
 ;;;; Tacky -> Instructions
 
-(defn- tacky-val->assembly-operand [val]
-  (let [type (:type val)
-        v (:value val)]
-    (condp = type
-      :constant (imm-operand v)
-      :variable (pseudo-operand v))))
+(defn- tacky-val->assembly-operand [{:keys [type value]}]
+  (condp = type
+    :constant (imm-operand value)
+    :variable (pseudo-operand value)))
 
 (defn-  tacky-return->assembly [instruction]
   (let [val (:val instruction)
@@ -168,6 +184,60 @@
 (defn- tacky-label->assembly [instruction]
   [(label-instruction (:identifier instruction))])
 
+(defn- pass-args-in-registers-instructions
+  "Caller function stores the arguments in registers.
+
+  Only first 6 arguments are stored in registers. Remaining stored on stack."
+  [register-args]
+  (let [argument-passing-registers [:di :si :dx :cx :r8 :r9]
+        arg-mov-instruction (fn [[reg arg]]
+                              (let [operand (tacky-val->assembly-operand arg)]
+                                (mov-instruction operand (reg-operand reg))))]
+    (->> register-args
+         (interleave argument-passing-registers)
+         (partition 2)
+         (map arg-mov-instruction)
+         flatten)))
+
+(defn- pass-args-on-stack-instructions
+  "Caller function stores the arguments on stack.
+
+  First 6 arguments already stored in registers."
+  [stack-args]
+  (let [arg-mov-instruction (fn [arg]
+                              (let [operand (tacky-val->assembly-operand arg)
+                                    operand-type (:type operand)
+                                    reg-or-imm? (or (= operand-type :imm) (= operand-type :reg))]
+                                (if reg-or-imm?
+                                  [(push-instruction operand)]
+                                  [(mov-instruction operand (reg-operand :ax))
+                                   (push-instruction (reg-operand :ax))])))]
+    (->> stack-args
+         reverse
+         (map arg-mov-instruction)
+         flatten
+         (remove nil?))))
+
+(defn- tacky-fun-call->assembly [{:keys [identifier arguments dst]}]
+  (let [[register-args stack-args] (split-at 6 arguments)
+        stack-padding (if (odd? (count stack-args)) 8 0)
+        fix-stack-alignment-instruction (if (not= stack-padding 0)
+                                          [(allocate-stack-instruction stack-padding)]
+                                          [])
+        bytes-to-remove (+ stack-padding (* 8 (count stack-args)))
+        deallocate-arguments-instruction (if (not= bytes-to-remove 0)
+                                           [(deallocate-stack-instruction bytes-to-remove)]
+                                           [])
+        assembly-dst (tacky-val->assembly-operand dst)]
+    (->> [fix-stack-alignment-instruction
+          (pass-args-in-registers-instructions register-args)
+          (pass-args-on-stack-instructions stack-args)
+          (call-instruction identifier)
+          deallocate-arguments-instruction
+          (mov-instruction (reg-operand :ax) assembly-dst)]
+         (remove nil?)
+         flatten)))
+
 (def tacky->assembly-transformers
   {:unary #'tacky-unary->assembly
    :return #'tacky-return->assembly
@@ -176,25 +246,40 @@
    :jump #'tacky-jump->assembly
    :label #'tacky-label->assembly
    :jump-if-zero #'tacky-jump-if-zero->assembly
-   :jump-if-not-zero #'tacky-jump-if-not-zero->assembly})
+   :jump-if-not-zero #'tacky-jump-if-not-zero->assembly
+   :fun-call #'tacky-fun-call->assembly})
 
 (defn- tacky-inst->assembly-inst [inst]
   (let [transformer-fn ((:type inst) tacky->assembly-transformers)]
     (transformer-fn inst)))
 
-(defn- find-pseudo-values [instructions]
-  (distinct
-   (remove
-    nil?
-    (reduce (fn [pseudo-acc inst]
-              (let [paths [:src :dst :operand]
-                    values (reduce (fn [acc path]
-                                     (if (get-in inst [path :operand])
-                                       (conj acc (get-in inst [path :identifier]))
-                                       acc)) [] paths)]
-                (concat pseudo-acc values))) [] instructions))))
+(defn- find-pseudo-values
+  "Returns list of identifiers for pseudo operands.
 
-(defn- create-pseudo-value-map [pseudo-values]
+  Drills into each instruction. Collects identifier from any pseudo operand."
+  [instructions]
+  (let [pseudo-operand? (fn [instruction path-to-operand]
+                          (= :pseudo (get-in instruction [path-to-operand :operand-type])))
+        operand-keys-in-instruction [:src :dst :operand]
+        instruction->pseudo-values (fn [instruction]
+                                     (reduce
+                                      (fn [acc path]
+                                        (if (pseudo-operand? instruction path)
+                                          (conj acc (get-in instruction [path :identifier]))
+                                          acc))
+                                      []
+                                      operand-keys-in-instruction))]
+    (->> instructions
+         (map instruction->pseudo-values)
+         flatten
+         (remove nil?)
+         distinct)))
+
+(defn- create-pseudo-value-map
+  "Returns a map from pseudo identifiers.
+
+  Assigns each identifier values, corresponding to memory addresses in stack."
+  [pseudo-values]
   (reduce
    (fn [acc cur]
      (let [exists? (contains? acc cur)
@@ -205,16 +290,12 @@
    {"current" 0}
    pseudo-values))
 
-(defn- pseudo->stack-operand-instruction [pvs instruction]
-  (let [pseudo? (fn [inst path]
-                  (let [v (get-in inst [path :operand])]
-                    (if v
-                      (= :pseudo v)
-                      false)))
+(defn- pseudo->stack-operand-instruction [pseudo-value->stack-value instruction]
+  (let [pseudo-operand? (fn [inst path] (= :pseudo (get-in inst [path :operand-type])))
         replace-pseudo (fn [inst path]
-                         (if (pseudo? inst path)
+                         (if (pseudo-operand? inst path)
                            (let [v (get-in inst [path :identifier])
-                                 sv (get pvs v)]
+                                 sv (get pseudo-value->stack-value v)]
                              (assoc inst path (stack-operand sv)))
                            inst))]
     (-> instruction
@@ -285,26 +366,50 @@
   (let [f (or ((:op instruction) fix-instruction-map) #'identity)]
     (f instruction)))
 
-(defn- add-allocate-stack-instruction [{instructions :instructions max-stack-val :max-stack-val}]
-  (cons (allocate-stack-instruction max-stack-val) instructions))
+(defn- add-allocate-stack-instruction
+  "Adds allocate stack instruction at the start of the function.
 
-(defn- assembly-generate-instructions [tacky-instructions]
-  (->> tacky-instructions
-       (map tacky-inst->assembly-inst)
-       flatten
-       replace-pseudoregisters
-       add-allocate-stack-instruction
-       (map fix-instruction)
-       flatten))
+  Stack space allocated needs to be a multiple of 16. Rouding up the size of
+  stack frame makes it easier to maintain stack alignment during function calls."
+  [{instructions :instructions max-stack-val :max-stack-val}]
+  (let [stack-abs (abs max-stack-val)
+        stack-value (- (+ stack-abs (mod stack-abs 16)))]
+    (cons (allocate-stack-instruction stack-value) instructions)))
 
-(defn- transform-function [fn-ast]
-  {:op (:type fn-ast)
-   :identifier (:identifier fn-ast)
-   :parameters (:parameters fn-ast)
-   :instructions (assembly-generate-instructions (:instructions fn-ast))})
+(defn- parameters->assembly-instructions
+  "Moves parameters from registers and stacks to pseudoregisters.
+
+  First parameters stored in registers.
+  Remaining in stack."
+  [parameters]
+  (let [registers [:di :si :dx :cx :r8 :r9]
+        [register-params stack-params] (split-at 6 parameters)
+        reg-args-to-pseudo-instructions (map (fn [reg param]
+                                               [(mov-instruction (reg-operand reg) (pseudo-operand (:identifier param)))])
+                                             registers
+                                             register-params)
+        stack-args-to-pseudo-instruction (map-indexed (fn [idx param]
+                                                        [(mov-instruction (stack-operand (+ 16 (* 8 idx))) (pseudo-operand (:identifier param)))]) stack-params)]
+    (->> [reg-args-to-pseudo-instructions stack-args-to-pseudo-instruction]
+         flatten
+         (remove nil?))))
+
+(defn- tacky-function->assembly-function [{:keys [type identifier parameters instructions] :as function-definition}]
+  (let [parameter-instructions (parameters->assembly-instructions parameters)
+        body-instructions (->> instructions
+                               (keep tacky-inst->assembly-inst)
+                               flatten)]
+    {:op type
+     :identifier identifier
+     :instructions (->> [parameter-instructions body-instructions]
+                        flatten
+                        replace-pseudoregisters
+                        add-allocate-stack-instruction
+                        (keep fix-instruction)
+                        flatten)}))
 
 (defn- tacky-ast->assembly [ast]
-  (map transform-function ast))
+  (map tacky-function->assembly-function ast))
 
 (defn generate-assembly [source]
   (-> source
@@ -316,15 +421,18 @@
 
 (comment
 
-  (def ex "int main(void){return 2;}")
+  (generate-assembly
+   "
+int foo(int a) {
+    return a + 1;
+}
 
-  (pp/pprint (-> ex
-                 generate-assembly))
+int main (void) {
+    int y = 5;
+    int x = foo(10);
+    return x;
+}
 
-  (pp/pprint
-   (generate-assembly
-    "int main(void) {
-return 1 >= 2;
-}"))
+")
 
   ())
