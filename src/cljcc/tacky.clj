@@ -4,7 +4,8 @@
    [cljcc.lexer :as l]
    [cljcc.util :as u]
    [cljcc.parser :as p]
-   [cljcc.analyzer :as a]))
+   [cljcc.analyzer :as a]
+   [cljcc.symbols :as symbols]))
 
 (defn- variable
   ([]
@@ -379,8 +380,9 @@
         (dissoc :body)
         (assoc :instructions instructions))))
 
-(defn tacky-generate [{ast :block}]
-  (let [defined? (fn [x] (seq (:body x)))]
+(defn tacky-generate [{ast :block symbols :decl-name->symbol}]
+  (let [_ (symbols/reset-symbols symbols)
+        defined? (fn [x] (or (= (:identifier x) "main") (seq (:body x))))]
    (->> ast
        (filter defined?)
        (map function-definition->tacky-function))))

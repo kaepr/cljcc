@@ -394,7 +394,7 @@
          flatten
          (remove nil?))))
 
-(defn- tacky-function->assembly-function [{:keys [type identifier parameters instructions] :as function-definition}]
+(defn- tacky-function->assembly-function [{:keys [type identifier parameters instructions]}]
   (let [parameter-instructions (parameters->assembly-instructions parameters)
         body-instructions (->> instructions
                                (keep tacky-inst->assembly-inst)

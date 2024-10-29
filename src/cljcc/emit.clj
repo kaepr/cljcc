@@ -3,13 +3,27 @@
             [cljcc.util :refer [get-os]]
             [cljcc.compiler :as c]
             [clojure.string :as str]
-            [clojure.pprint :as pp]))
+            [clojure.pprint :as pp]
+            [cljcc.symbols :as symbols]))
 
 (defn- handle-label [identifier]
   (condp = (get-os)
     :mac (str "L" identifier)
     :linux (str ".L" identifier)
     (throw (ex-info "Error in generating label." {}))))
+
+
+(defn- handle-function-name [name]
+  (if (= :mac (get-os))
+    (str "_" name)
+    name))
+
+(defn- handle-current-translation-unit [name]
+  (if (= :mac (get-os))
+    (handle-function-name name)
+    (if (contains? @symbols/symbols name)
+      name
+      (str name "@PLT"))))
 
 ;;;; Operand Emit
 
@@ -19,24 +33,48 @@
 (defn- stack-operand-emit [operand _opts]
   (format "%d(%%rbp)" (:value operand)))
 
-(defn- register-operand [operand opts]
-  (if (contains? opts :byte-1)
-    (condp = (:register operand)
-      :ax "%al"
-      :dx "%dl"
-      :r10 "%r10b"
-      :r11 "%r11b"
-      :cx "%cl"
-      :cl "%cl"
-      (throw (AssertionError. (str "Invalid register operand: " operand))))
-    (condp = (:register operand)
-      :ax "%eax"
-      :dx "%edx"
-      :r10 "%r10d"
-      :r11 "%r11d"
-      :cx "%ecx"
-      :cl "%cl"
-      (throw (AssertionError. (str "Invalid register operand: " operand))))))
+(defn- register-operand [{:keys [register] :as operand} {register-width :register-width :or {register-width :4-byte}}]
+  (let [register->width->output {:ax {:8-byte "%rax"
+                                      :4-byte "%eax"
+                                      :1-byte "%al"}
+
+                                 :dx {:8-byte "%rdx"
+                                      :4-byte "%edx"
+                                      :1-byte "%dl"}
+
+                                 :cx {:8-byte "%rcx"
+                                      :4-byte "%ecx"
+                                      :1-byte "%cl"}
+
+                                 :di {:8-byte "%rdi"
+                                      :4-byte "%edi"
+                                      :1-byte "%dil"}
+
+                                 :si {:8-byte "%rsi"
+                                      :4-byte "%esi"
+                                      :1-byte "%sil"}
+
+                                 :r8 {:8-byte "%r8"
+                                      :4-byte "%r8d"
+                                      :1-byte "%r8b"}
+
+                                 :r9 {:8-byte "%r9"
+                                      :4-byte "%r9d"
+                                      :1-byte "%r9b"}
+
+                                 :r10 {:8-byte "%r10"
+                                       :4-byte "%r10d"
+                                       :1-byte "%r10b"}
+
+                                 :r11 {:8-byte "%r11"
+                                       :4-byte "%r11d"
+                                       :1-byte "%r11b"}
+
+                                 :cl {:4-byte "%cl"
+                                      :1-byte "%cl"}}]
+    (if-let [out (get-in register->width->output [register register-width])]
+      out
+      (throw (AssertionError. (str "Invalid register operand register width " operand " " register-width))))))
 
 (def operand-emitters
   "Map of assembly operands to operand emitters."
@@ -74,7 +112,7 @@
 
 (defn- setcc-instruction-emit [instruction]
   (let [cc (name (:cond-code instruction))
-        operand (operand-emit (:operand instruction) {:byte-1 true})]
+        operand (operand-emit (:operand instruction) {:register-width :1-byte})]
     [(format "    set%s        %s" cc operand)]))
 
 (defn- label-instruction-emit [instruction]
@@ -118,6 +156,15 @@
 (defn- allocate-stack-instruction-emit [instruction]
   [(format "    subq        $%d, %%rsp" (:value instruction))])
 
+(defn- deallocate-stack-instruction-emit [instruction]
+  [(format "    addq        $%d, %%rsp" (:value instruction))])
+
+(defn- push-instruction-emit [instruction]
+  [(format "    pushq       %s" (operand-emit (:operand instruction) {:register-width :8-byte}))])
+
+(defn- call-instruction-emit [instruction]
+  [(format "    call        %s" (handle-current-translation-unit (:identifier instruction)))])
+
 (def instruction-emitters
   "Map of assembly instructions to function emitters."
   {:mov #'mov-instruction-emit
@@ -131,19 +178,17 @@
    :jmpcc #'jmpcc-instruction-emit
    :label #'label-instruction-emit
    :cmp #'cmp-instruction-emit
-   :allocate-stack #'allocate-stack-instruction-emit})
+   :allocate-stack #'allocate-stack-instruction-emit
+   :deallocate-stack #'deallocate-stack-instruction-emit
+   :push #'push-instruction-emit
+   :call #'call-instruction-emit})
 
 (defn instruction-emit [instruction]
   (if-let [[_ instruction-emit-fn] (find instruction-emitters (:op instruction))]
     (instruction-emit-fn instruction)
     (throw (AssertionError. (str "Invalid instruction: " instruction)))))
 
-(defn- handle-function-name [name]
-  (if (= :mac (get-os))
-    (str "_" name)
-    name))
-
-(defn function-emit [f]
+(defn function-definition-emit [f]
   (let [name (handle-function-name (:identifier f))
         globl (format "    .globl %s", name)
         name-line (format "%s:" name)
@@ -156,7 +201,7 @@
 
 (def emitters-top-level
   "Map of assembly top level constructs to their emitters."
-  {:function #'function-emit})
+  {:declaration #'function-definition-emit})
 
 (defn emit-top-level [assembly-ast]
   (if-let [[_ emit-fn] (find emitters-top-level (:op assembly-ast))]
@@ -179,39 +224,10 @@
 
 (comment
 
-  (def ex "int main(void) {return 2;}")
-
-  (mov-instruction-emit
-   {:op :mov
-    :src {:operand :imm :value 1}
-    :dst {:operand :stack :value -4}})
-
-  (c/generate-assembly
-   "int main(void) {
-     return ~(-(~(-1)));
-    }")
-
-  (pp/pprint
-   (c/generate-assembly
-    "int main(void) {
+   (emit
+    (c/generate-assembly
+     "int main(void) {
      return ~(-(~(-1)));
     }"))
-
-  (println
-   (emit
-    (c/generate-assembly
-     "int main(void) {
-       return 1 + 2 == 4 + 5;
-    }")))
-
-  (println
-   (emit
-    (c/generate-assembly
-     "int main(void) {
-       return 6;
-    }")))
-
-  (-> ex
-      p/parse)
 
   ())

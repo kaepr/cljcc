@@ -9,7 +9,8 @@
    [clojure.pprint :as pp]
    [cljcc.log :as log]
    [cljcc.util :refer [get-os handle-sh mac-aarch64? make-file-name]]
-   [cljcc.parser :as p]))
+   [cljcc.parser :as p]
+   [clojure.string :as str]))
 
 (defn- validate-os []
   (let [os (get-os)]
@@ -44,7 +45,9 @@
         assembly-out-file-path (make-file-name directory (remove-extension filename) "s")
         _ (println assembly-output)
         _ (spit assembly-out-file-path assembly-output)
-        output-file (str directory "/" file-without-ext)
+        output-file (if (:generate-object-file options)
+                      (str directory "/" (str file-without-ext ".o"))
+                      (str directory "/" file-without-ext))
         output (if (:generate-object-file options)
                  (handle-sh "gcc" "-c" assembly-file "-o" output-file)
                  (handle-sh "gcc" assembly-file "-o" output-file))]
