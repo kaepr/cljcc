@@ -372,9 +372,12 @@
   Stack space allocated needs to be a multiple of 16. Rouding up the size of
   stack frame makes it easier to maintain stack alignment during function calls."
   [{instructions :instructions max-stack-val :max-stack-val}]
-  (let [stack-abs (abs max-stack-val)
-        stack-value (- (+ stack-abs (mod stack-abs 16)))]
-    (cons (allocate-stack-instruction stack-value) instructions)))
+  (let [v (abs max-stack-val)
+        v (cond
+              (= (mod v 16) 0) v
+              (< v 0) (- v (- 16 (mod v 16)))
+              :else (+ v (- 16 (mod v 16))))]
+    (cons (allocate-stack-instruction v) instructions)))
 
 (defn- parameters->assembly-instructions
   "Moves parameters from registers and stacks to pseudoregisters.
