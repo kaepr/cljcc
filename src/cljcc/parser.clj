@@ -402,12 +402,4 @@
 
 (comment
 
-  (pp/pprint (parse-from-src "
-int main(void) {
-if (1 < 0) {
-int x = 1;
-}
-}
-  "))
-
   ())

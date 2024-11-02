@@ -183,6 +183,8 @@
     "for" :kw-for
     "break" :kw-break
     "continue" :kw-continue
+    "static" :kw-static
+    "extern" :kw-extern
     :identifier))
 
 (defn create
