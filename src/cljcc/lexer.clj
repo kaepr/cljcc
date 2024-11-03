@@ -1,8 +1,8 @@
 (ns cljcc.lexer
   (:require
    [cljcc.util :refer [newline? whitespace? read-number digit? letter-digit? letter?]]
-   [cljcc.token :as t]
-   [clojure.pprint :as pp]))
+   [cljcc.exception :as exc]
+   [cljcc.token :as t]))
 
 (defn- lexer-ctx []
   {:tokens []
@@ -63,15 +63,18 @@
                     (recur (apply str rst) npos (-> ctx
                                                     (update :col #(+ % cnt))
                                                     (update :tokens #(conj % token)))))
-     :else (throw (ex-info "Lexer error. Invalid token." {:line line :col col})))))
+     :else (exc/lex-error {:line line :col col}))))
 
 (comment
 
-  "int main(void) {
-    return 2;
-  }"
+  (lex "int main(void) {return int a = 2; a <<= 2;}")
 
-  (pp/pprint
-   (lex "int main(void) {return int a = 2; a <<= 2;}"))
 
-  ())
+  (lex "
+ extern int a;
+
+ int main(void) {
+                 return 42};")
+
+
+ ())

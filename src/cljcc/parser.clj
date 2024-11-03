@@ -2,17 +2,21 @@
   (:require
    [cljcc.lexer :as l]
    [cljcc.token :as t]
-   [clojure.pprint :as pp]))
+   [cljcc.exception :as exc]))
 
 (declare parse parse-exp parse-statement parse-block expect parse-declaration parse-variable-declaration)
 
-(defn- parse-repeatedly [tokens parse-f end-kind]
-  (loop [tokens tokens
-         res []]
+(defn- parse-repeatedly
+  "Repeatedly runs given parse function on input until end-kind encountered.
+
+  `parse-f` must return result in form [node remaining-tokens]."
+  [tokens parse-f end-kind]
+  (loop [res []
+         tokens tokens]
     (if (= end-kind (:kind (first tokens)))
       [res tokens]
       (let [[node rst] (parse-f tokens)]
-        (recur rst (conj res node))))))
+        (recur (conj res node) rst)))))
 
 (defn- parse-optional-expression [[{kind :kind} :as tokens] parse-f end-kind]
   (if (= kind end-kind)
@@ -250,14 +254,18 @@
     [(do-while-statement-node e s) tokens]))
 
 (defn- parse-for-init-statement [[{kind :kind} :as tokens]]
-  (if (= kind :kw-int)
-    (parse-variable-declaration tokens)
+  (if (contains? #{:kw-int :kw-static :kw-extern} kind)
+    (parse-declaration tokens)
     (parse-optional-expression tokens parse-exp :semicolon)))
 
 (defn- parse-for-statement [tokens]
   (let [[_ tokens] (expect :kw-for tokens)
         [_ tokens] (expect :left-paren tokens)
         [for-init-node tokens] (parse-for-init-statement tokens)
+        _ (when (= :function (:declaration-type for-init-node))
+            (exc/parser-error "Function declaration used in initializer node." for-init-node))
+        _ (when-not (nil? (:storage-class for-init-node))
+            (exc/parser-error "For initializer cannot contain storage class specifier." for-init-node))
         [cond-exp tokens] (parse-optional-expression tokens parse-exp :semicolon)
         [post-exp tokens] (parse-optional-expression tokens parse-exp :right-paren)
         [stmt tokens] (parse-statement tokens)]
@@ -295,27 +303,37 @@
     (= kind :left-curly) (parse-compound-statement tokens)
     :else (parse-expression-statement tokens)))
 
+(defn parameter-node [token]
+  {:parameter-name (:literal token)
+   :identifier (:literal token)
+   :parameter-type (:kind token)})
+
+(defn specifier-node [{:keys [kind] :as token}]
+  (let [specifier-type (condp = kind
+                         :kw-int :int
+                         :kw-static :static
+                         :kw-extern :extern
+                         (throw (ex-info "Parser Error. Invalid specifier." {:specifier-token token})))]
+    {:type :specifier
+     :specifier-type specifier-type}))
+
 (defn variable-declaration-node
-  ([identifier]
+  ([identifier storage-class]
+   (variable-declaration-node identifier storage-class nil))
+  ([identifier storage-class v]
    {:type :declaration
-    :declaration-type :variable
-    :identifier identifier})
-  ([identifier v]
-   {:type :declaration
+    :storage-class storage-class
     :declaration-type :variable
     :identifier identifier
     :initial v}))
 
 (defn function-declaration-node
-  ([return-type identifier params]
+  ([return-type storage-class identifier params]
+   (function-declaration-node return-type storage-class identifier params nil))
+  ([return-type storage-class identifier params body]
    {:type :declaration
     :return-type return-type
-    :declaration-type :function
-    :identifier identifier
-    :parameters params})
-  ([return-type identifier params body]
-   {:type :declaration
-    :return-type return-type
+    :storage-class storage-class
     :declaration-type :function
     :identifier identifier
     :parameters params
@@ -336,46 +354,58 @@
                               [ident-token tokens]))
             [rest-params tokens] (parse-repeatedly tokens parse-comma-f :right-paren)
             [_ tokens] (expect :right-paren tokens)
-            map-param-f (fn [p]
-                          {:parameter-name (:literal p)
-                           :identifier (:literal p)
-                           :parameter-type (:kind p)})
-            params (map map-param-f (into [ident-token] (vec rest-params)))]
+            params (map parameter-node (into [ident-token] (vec rest-params)))]
         [params tokens]))))
 
-(defn- parse-function-declaration [tokens]
-  (let [[{ret-kind :kind} tokens] (expect :kw-int tokens)
-        [{fn-name :literal} tokens] (expect :identifier tokens)
+(defn- parse-function-declaration [return-type storage-class tokens]
+  (let [[{fn-name :literal} tokens] (expect :identifier tokens)
         [_ tokens] (expect :left-paren tokens)
         [params tokens] (parse-param-list tokens)
         semicolon? (= :semicolon (:kind (first tokens)))]
     (if semicolon?
       (let [[_ tokens] (expect :semicolon tokens)]
-        [(function-declaration-node (keyword->type ret-kind) fn-name params) tokens])
+        [(function-declaration-node return-type storage-class fn-name params) tokens])
       (let [[body tokens] (parse-block tokens)]
-        [(function-declaration-node (keyword->type ret-kind) fn-name params body) tokens]))))
+        [(function-declaration-node return-type storage-class fn-name params body) tokens]))))
 
-(defn- parse-variable-declaration [tokens]
-  (let [[_ tokens] (expect :kw-int tokens)
-        [ident-token tokens] (expect :identifier tokens)
+(defn- parse-variable-declaration [_variable-type storage-class tokens]
+  (let [[ident-token tokens] (expect :identifier tokens)
         [{kind :kind} :as tokens] tokens]
     (cond
       (= kind :semicolon) (let [[_ tokens] (expect :semicolon tokens)]
-                            [(variable-declaration-node (:literal ident-token)) tokens])
+                            [(variable-declaration-node (:literal ident-token) storage-class) tokens])
       (= kind :assignment) (let [[_ tokens] (expect :assignment tokens)
                                  [exp-node tokens] (parse-exp tokens)
                                  [_ tokens] (expect :semicolon tokens)]
-                             [(variable-declaration-node (:literal ident-token) exp-node) tokens])
+                             [(variable-declaration-node (:literal ident-token) storage-class exp-node) tokens])
       :else (throw (ex-info "Parser error. Not able  to parse variable declaration." {})))))
 
+(defn- parse-specifier [[{:keys [kind] :as token} & rst]]
+  (if-not (contains? #{:kw-int :kw-static :kw-extern} kind)
+    (exc/parser-error "Invalid token for specifier" {:token token})
+    [(specifier-node token) rst]))
+
+(defn- parse-type-and-storage-class [specifiers]
+  (let [{types true, storage-classes false} (group-by #(= :int (:specifier-type %)) specifiers)
+        type-specifier (if (not= 1 (count types))
+                         (exc/parser-error "Invalid type specifier." {:types types})
+                         (:specifier-type (first types)))
+        storage-class (if (> (count storage-classes) 1)
+                        (exc/parser-error "Invalid storage class." {:storage-classes storage-classes})
+                        (:specifier-type (first storage-classes)))]
+    {:type-specifier type-specifier
+     :storage-class storage-class}))
+
 (defn- parse-declaration [tokens]
-  (let [fn? (= :left-paren (:kind (nth tokens 2)))]
+  (let [[specifiers tokens] (parse-repeatedly tokens parse-specifier :identifier)
+        {type-specifier :type-specifier, storage-class :storage-class} (parse-type-and-storage-class specifiers)
+        fn? (= :left-paren (:kind (nth tokens 1)))]
     (if fn?
-      (parse-function-declaration tokens)
-      (parse-variable-declaration tokens))))
+      (parse-function-declaration type-specifier storage-class tokens)
+      (parse-variable-declaration type-specifier storage-class tokens))))
 
 (defn- parse-block-item [[token :as tokens]]
-  (if (= :kw-int (:kind token))
+  (if (contains? #{:kw-int :kw-static :kw-extern} (:kind token))
     (parse-declaration tokens)
     (parse-statement tokens)))
 
@@ -386,9 +416,9 @@
     [block-items tokens]))
 
 (defn- parse-program [tokens]
-  (let [[fn-declaratrions tokens] (parse-repeatedly tokens parse-function-declaration :eof)
+  (let [[declarations tokens] (parse-repeatedly tokens parse-declaration :eof)
         _ (expect :eof tokens)]
-    fn-declaratrions))
+    declarations))
 
 (defn parse [tokens]
   (-> tokens
@@ -401,5 +431,18 @@
       parse))
 
 (comment
+
+  (parse-from-src "
+int main(void) {
+
+    int x = 0;
+
+    for (static int i = 0; i < 10; i = i + 1) {
+        x = x + 1;
+    }
+
+    return x;
+}
+")
 
   ())
