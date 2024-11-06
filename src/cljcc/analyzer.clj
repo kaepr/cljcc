@@ -2,7 +2,8 @@
   (:require [cljcc.lexer :as l]
             [clojure.pprint :as pp]
             [cljcc.util :as u]
-            [cljcc.parser :as p]))
+            [cljcc.parser :as p]
+            [cljcc.exception :as exc]))
 
 (defn- unique-identifier
   ([] (unique-identifier "analyzer"))
@@ -11,179 +12,258 @@
 (defn- copy-identifier-map
   "Returns a copy of the identifier map.
 
-  Sets :from-current-block as false for every entry. Used when going into a inner scope."
-  [identifier-map]
-  (zipmap (keys identifier-map)
-          (map (fn [m]
-                 (update m :from-current-block (fn [_] false)))
-               (vals identifier-map))))
+  Sets :at-top-level false, as it's going inside a scope. ( Could be fn definition, compound statement ).
+  Sets :from-current-block as false for every symbol. Used when going into a inner scope."
+  [ident->symbol]
+  (let [set-from-current-block-as-false (fn [i->s]
+                                          (zipmap (keys i->s)
+                                                  (map (fn [s]
+                                                         (assoc s :from-current-block false))
+                                                       (vals i->s))))]
+    (-> ident->symbol
+        (dissoc :at-top-level)
+        set-from-current-block-as-false
+        (assoc :at-top-level false))))
 
 (declare resolve-block)
 
-(defn- resolve-exp [e identifier-map]
+(defn- resolve-exp [e ident->symbol]
   (condp = (:exp-type e)
     :constant-exp e
-    :variable-exp (if (contains? identifier-map (:identifier e))
-                    (p/variable-exp-node (:name (get identifier-map (:identifier e))))
-                    (throw (ex-info "Undeclared variable seen." {:variable e})))
+    :variable-exp (if (contains? ident->symbol (:identifier e))
+                    (p/variable-exp-node (:name (get ident->symbol (:identifier e))))
+                    (exc/analyzer-error "Undeclared variable seen." {:variable e}))
     :assignment-exp (let [left (:left e)
                           right (:right e)
                           op (:assignment-operator e)
                           left-var? (= :variable-exp (:exp-type left))]
                       (if left-var?
-                        (p/assignment-exp-node (resolve-exp left identifier-map)
-                                               (resolve-exp right identifier-map)
+                        (p/assignment-exp-node (resolve-exp left ident->symbol)
+                                               (resolve-exp right ident->symbol)
                                                op)
-                        (throw (ex-info "Invalid lvalue." {:lvalue e}))))
-    :binary-exp (p/binary-exp-node (resolve-exp (:left e) identifier-map)
-                                   (resolve-exp (:right e) identifier-map)
+                        (exc/analyzer-error "Invalid lvalue in assignment expression." {:lvalue e})))
+    :binary-exp (p/binary-exp-node (resolve-exp (:left e) ident->symbol)
+                                   (resolve-exp (:right e) ident->symbol)
                                    (:binary-operator e))
-    :unary-exp (p/unary-exp-node (:unary-operator e) (resolve-exp (:value e) identifier-map))
-    :conditional-exp (p/conditional-exp-node (resolve-exp (:left e) identifier-map)
-                                             (resolve-exp (:middle e) identifier-map)
-                                             (resolve-exp (:right e) identifier-map))
+    :unary-exp (p/unary-exp-node (:unary-operator e) (resolve-exp (:value e) ident->symbol))
+    :conditional-exp (p/conditional-exp-node (resolve-exp (:left e) ident->symbol)
+                                             (resolve-exp (:middle e) ident->symbol)
+                                             (resolve-exp (:right e) ident->symbol))
     :function-call-exp (let [fn-name (:identifier e)
                              args (:arguments e)]
-                         (if (contains? identifier-map fn-name)
-                           (p/function-call-exp-node (:new-name (get identifier-map fn-name))
-                                                     (map #(resolve-exp % identifier-map) args))
+                         (if (contains? ident->symbol fn-name)
+                           (p/function-call-exp-node (:new-name (get ident->symbol fn-name))
+                                                     (map #(resolve-exp % ident->symbol) args))
                            (throw (ex-info "Undeclared function !" {:function-name fn-name}))))
-    (throw (ex-info "Analyzer error. Invalid expression type" {:exp e}))))
+    (exc/analyzer-error "Invalid expression." {:exp e})))
 
 (defn- resolve-optional-exp [e identifier-map]
   (if (nil? e)
     e
     (resolve-exp e identifier-map)))
 
+(defn- resolve-file-scope-variable-declaration
+  "Adds file scope variable declaration to scope.
+
+  Directly adds variable declaration to map as it is top level."
+  [{:keys [identifier] :as declaration} ident->symbol]
+  {:declaration declaration
+   :ident->symbol (assoc ident->symbol identifier {:new-name identifier
+                                                   :name identifier
+                                                   :from-current-scope true
+                                                   :has-linkage true})})
+
+(defn- resolve-local-variable-declaration
+  "Add local variable declaration.
+
+  Validates for variables declared with same name.
+  Validates for variables declared from different scope, but with conflicting storage class."
+  [{:keys [identifier initial storage-class] :as declaration} ident->symbol]
+  (let [prev-entry (get ident->symbol identifier)
+        extern? (= storage-class :extern)
+        _ (when (and prev-entry (:from-current-scope prev-entry))
+            (when (not (and (:has-linkage prev-entry) extern?))
+              (exc/analyzer-error "Conflicting local declaration." {:declaration declaration})))]
+    (if extern?
+      {:declaration declaration
+       :ident->symbol (assoc ident->symbol identifier {:new-name identifier
+                                                       :name identifier
+                                                       :from-current-scope true
+                                                       :has-linkage true})}
+      (let [unique-name (unique-identifier identifier)
+            updated-symbols (assoc ident->symbol identifier {:new-name unique-name
+                                                             :name unique-name
+                                                             :from-current-scope true
+                                                             :has-linkage false})
+            init-value (when initial (resolve-exp initial updated-symbols))]
+        {:declaration (p/variable-declaration-node unique-name storage-class init-value)
+         :ident->symbol updated-symbols}))))
+
 (defn- resolve-variable-declaration
   "Resolves variable declarations.
 
   Ensures variable not declared twice in the current scope."
-  [{:keys [identifier initial] :as d} identifier-map]
-  (if (and (contains? identifier-map identifier)
-           (:from-current-block (get identifier-map identifier)))
-    (throw (ex-info "Analyzer error. Duplicate variable declaration." {:declaration d}))
-    (let [unique-name (unique-identifier identifier)
-          updated-identifier-map (assoc identifier-map identifier {:name unique-name
-                                                                   :from-current-block true
-                                                                   :has-linkage false})
-          init-value (when initial (resolve-exp initial updated-identifier-map))]
-      {:declaration (p/variable-declaration-node unique-name init-value)
-       :identifier-map updated-identifier-map})))
+  [decl {:keys [at-top-level] :as ident->symbol}]
+  (if at-top-level
+    (resolve-file-scope-variable-declaration decl ident->symbol)
+    (resolve-local-variable-declaration decl ident->symbol)))
 
-(defn- resolve-parameter [{:keys [identifier] :as param} identifier-map]
-  (if (and (contains? identifier-map identifier)
-           (:from-current-block (get identifier-map identifier)))
-    (throw (ex-info "Analyzer error. Parameter name duplicated." {:parameter param}))
+(defn- resolve-parameter [{:keys [identifier] :as param} ident->symbol]
+  (if (and (contains? ident->symbol identifier)
+           (:from-current-block (get ident->symbol identifier)))
+    (exc/analyzer-error "Parameter name duplicated." {:parameter param})
     (let [unique-name (unique-identifier identifier)
-          updated-identifier-map (assoc identifier-map identifier {:name unique-name
-                                                                   :from-current-block true
-                                                                   :has-linkage false})]
-      {:parameter (p/variable-declaration-node unique-name)
-       :identifier-map updated-identifier-map})))
+          storage-class nil
+          updated-identifier-map (assoc ident->symbol identifier {:name unique-name
+                                                                  :from-current-block true
+                                                                  :has-linkage false})]
+      {:parameter (p/variable-declaration-node unique-name storage-class)
+       :ident->symbol updated-identifier-map})))
 
-(defn- resolve-parameters [params identifier-map]
+(defn- resolve-parameters [params ident->symbol]
   (reduce (fn [acc p]
-            (let [{:keys [parameter identifier-map]} (resolve-parameter p (:identifier-map acc))]
+            (let [{:keys [parameter ident->symbol]} (resolve-parameter p (:ident->symbol acc))]
               {:parameters (conj (:parameters acc) parameter)
-               :identifier-map identifier-map}))
-          {:parameters [] :identifier-map identifier-map}
+               :ident->symbol ident->symbol}))
+          {:parameters [] :ident->symbol ident->symbol}
           params))
 
 (defn- resolve-function-declaration
   "Resolve function declaration.
 
   Ensures functions not declared twice in current scope with incorrect linkage."
-  [{:keys [identifier parameters return-type body] :as d} identifier-map]
-  (let [prev-entry (get identifier-map identifier)
-        already-declared-var? (and (contains?  identifier-map identifier)
-                                   (:from-current-block (get identifier-map identifier))
+  [{:keys [identifier storage-class parameters return-type body] :as d} ident->symbol]
+  (let [prev-entry (get ident->symbol identifier)
+        already-declared-var? (and (contains?  ident->symbol identifier)
+                                   (:from-current-block (get ident->symbol identifier))
                                    (not (:has-linkage prev-entry)))
-        illegally-redeclared? (and (contains? identifier-map identifier)
+        illegally-redeclared? (and (contains? ident->symbol identifier)
                                    (:from-current-scope prev-entry)
                                    (not (:has-linkage prev-entry)))
-        inside-function-definition? (:inside-function-definition (:inside-inner-scope identifier-map))
+        static? (= :static storage-class)
+        inside-function-definition? (not (:at-top-level ident->symbol))
         _ (when already-declared-var?
-            (throw (ex-info "Analyzer Error. Variable already declared in same scope." {:declaration d})))
+            (exc/analyzer-error "Variable already declared in same scope." {:declaration d}))
         _ (when illegally-redeclared?
-            (throw (ex-info "Analyzer Error. Function duplicate declaration." {:declaration d})))
-        updated-identifier-map (assoc identifier-map identifier {:new-name identifier
-                                                                 :name identifier
-                                                                 :from-current-block true
-                                                                 :from-current-scope true
-                                                                 :has-linkage true})
+            (exc/analyzer-error "Function duplicate declaration." {:declaration d}))
+        updated-identifier-map (assoc ident->symbol identifier {:new-name identifier
+                                                                :name identifier
+                                                                :from-current-block true
+                                                                :from-current-scope true
+                                                                :has-linkage true})
         inner-map (copy-identifier-map updated-identifier-map)
-        {new-params :parameters, inner-map :identifier-map} (resolve-parameters parameters inner-map)
+        {new-params :parameters, inner-map :ident->symbol} (resolve-parameters parameters inner-map)
         _ (when (and body inside-function-definition?)
-            (throw (ex-info "Analyzer Error. Nested function definition not allowed." {:declaration d})))
-        new-body (when body (resolve-block body (assoc inner-map :inside-inner-scope {:inside-function-definition true})))]
-    {:declaration (p/function-declaration-node return-type identifier new-params (:block new-body))
-     :identifier-map updated-identifier-map}))
+            (exc/analyzer-error "Nested function definition not allowed." {:declaration d
+                                                                           :ident->symbol ident->symbol}))
+        _ (when (and inside-function-definition? static?)
+            (exc/analyzer-error "Nested static function declarations cannot exist." {:declaration d}))
+        new-body (when body (resolve-block body inner-map))]
+    {:declaration (p/function-declaration-node return-type storage-class identifier new-params (:block new-body))
+     :ident->symbol updated-identifier-map}))
 
-(defn- resolve-declaration [{:keys [declaration-type] :as d} identifier-map]
+(defn- resolve-declaration [{:keys [declaration-type] :as d} ident->symbol]
   (condp = declaration-type
-    :variable (resolve-variable-declaration d identifier-map)
-    :function (resolve-function-declaration d identifier-map)
+    :variable (resolve-variable-declaration d ident->symbol)
+    :function (resolve-function-declaration d ident->symbol)
     (throw (ex-info "Analyzer Error. Invalid declaration type." {:declaration d}))))
 
-(defn- resolve-for-init [for-init var-mp]
+(defn- resolve-for-init [for-init ident->symbol]
   (if (= (:type for-init) :declaration)
-    (resolve-declaration for-init var-mp)
-    (resolve-optional-exp for-init var-mp)))
+    (resolve-declaration for-init ident->symbol)
+    (resolve-optional-exp for-init ident->symbol)))
 
-(defn- resolve-statement [s mp]
-  (condp = (:statement-type s)
-    :return (p/return-statement-node (resolve-exp (:value s) mp))
-    :expression (p/expression-statement-node (resolve-exp (:value s) mp))
-    :if (if (:else-statement s)
-          (p/if-statement-node (resolve-exp (:condition s) mp)
-                               (resolve-statement (:then-statement s) mp)
-                               (resolve-statement (:else-statement s) mp))
-          (p/if-statement-node (resolve-exp (:condition s) mp)
-                               (resolve-statement (:then-statement s) mp)))
-    :break s
-    :continue s
-    :while (p/while-statement-node (resolve-exp (:condition s) mp)
-                                   (resolve-statement (:body s) mp))
-    :do-while (p/do-while-statement-node (resolve-exp (:condition s) mp)
-                                         (resolve-statement (:body s) mp))
-    :for (let [new-identifier-map (copy-identifier-map mp)
-               for-init (resolve-for-init (:init s) new-identifier-map)
-               new-var-map (if (:declaration for-init)
-                             (:identifier-map for-init)
-                             new-identifier-map) ; updates new-identifier-map so that include possible
-                                          ; variable declaration
-               for-init (if (:declaration for-init)
-                          (:declaration for-init)
-                          for-init)
-               condition (resolve-optional-exp (:condition s) new-var-map)
-               post (resolve-optional-exp (:post s) new-var-map)
-               body (resolve-statement (:body s) new-var-map)]
-           (p/for-statement-node for-init condition post body))
-    :compound (let [updated-mp (copy-identifier-map mp)]
-                (p/compound-statement-node (:block (resolve-block (:block s) updated-mp))))
-    :empty (p/empty-statement-node)
-    (throw (ex-info "Analyzer error. Invalid statement." {:statement s}))))
+(defmulti resolve-statement
+  "Resolves statements in a given scope.
 
-(defn- resolve-block-item [{:keys [type] :as item} identifier-map]
+  Scope here refers to the ident->symbol map, which holds declarations
+  visisble to statement at this time.
+
+  Dispatches based on the type of statement.
+
+  Returns statement after recursively resolving all expressions and statements.
+  "
+  (fn [statement _ident->symbol]
+    (:statement-type statement)))
+
+(defmethod resolve-statement :default [statement _]
+  (exc/analyzer-error "Invalid statement." {:statement statement}))
+
+(defmethod resolve-statement :return [{:keys [value]} ident->symbol]
+  (p/return-statement-node (resolve-exp value ident->symbol)))
+
+(defmethod resolve-statement :break [statement _]
+  statement)
+
+(defmethod resolve-statement :continue [statement _]
+  statement)
+
+(defmethod resolve-statement :empty [statement _]
+  statement)
+
+(defmethod resolve-statement :expression [{:keys [value]} ident->symbol]
+  (p/expression-statement-node (resolve-exp value ident->symbol)))
+
+(defmethod resolve-statement :if [{:keys [condition then-statement else-statement]} ident->symbol]
+  (if else-statement
+    (p/if-statement-node (resolve-exp condition ident->symbol)
+                         (resolve-statement then-statement ident->symbol)
+                         (resolve-statement else-statement ident->symbol))
+    (p/if-statement-node (resolve-exp condition ident->symbol)
+                         (resolve-statement then-statement ident->symbol))))
+
+(defmethod resolve-statement :while [{:keys [condition body]} ident->symbol]
+  (p/while-statement-node (resolve-exp condition ident->symbol)
+                          (resolve-statement body ident->symbol)))
+
+(defmethod resolve-statement :do-while [{:keys [condition body]} ident->symbol]
+  (p/do-while-statement-node (resolve-exp condition ident->symbol)
+                             (resolve-statement body ident->symbol)))
+
+(defmethod resolve-statement :for [{:keys [init condition post body]} ident->symbol]
+  (let [for-scope-identifier-map (copy-identifier-map ident->symbol)
+        resolved-for-init (resolve-for-init init for-scope-identifier-map)
+        for-scope-identifier-map (if (:declaration resolved-for-init) ; updates symbol map if for initializer is declaration
+                                   (:ident->symbol resolved-for-init)
+                                   for-scope-identifier-map)
+        resolved-for-init (if (:declaration resolved-for-init) ; getting the underlying declaration, if it is
+                            (:declaration resolved-for-init)
+                            resolved-for-init)
+        condition (resolve-optional-exp condition for-scope-identifier-map)
+        post (resolve-optional-exp post for-scope-identifier-map)
+        body (resolve-statement body for-scope-identifier-map)]
+    (p/for-statement-node resolved-for-init condition post body)))
+
+(defmethod resolve-statement :compound [{:keys [block]} ident->symbol]
+  (p/compound-statement-node (:block (resolve-block block (copy-identifier-map ident->symbol)))))
+
+(defn- resolve-block-item [{:keys [type] :as item} ident->symbol]
   (condp = type
-    :declaration (let [v (resolve-declaration item identifier-map)]
+    :declaration (let [v (resolve-declaration item ident->symbol)]
                    {:block-item (:declaration v)
-                    :identifier-map (:identifier-map v)})
-    :statement {:block-item (resolve-statement item identifier-map)
-                :identifier-map identifier-map}
-    (throw (ex-info "Analyzer Error. Invalid statement/declaration." {item item}))))
+                    :ident->symbol (:ident->symbol v)})
+    :statement {:block-item (resolve-statement item ident->symbol)
+                :ident->symbol ident->symbol}
+    (exc/analyzer-error "Invalid statement/declaration type." item)))
 
 (defn- resolve-block
+  "Resolves a block with a given symbol table.
+
+  ident->symbol holds identifier to symbol mapping.
+  Symbol contains the type information, generated variable name etc.
+
+  | key            | description |
+  |----------------|-------------|
+  |`:at-top-level` | Is current level top or not ( default true)|"
   ([block]
-   (resolve-block block {}))
-  ([block identifier-map]
+   (resolve-block block {:at-top-level true}))
+  ([block ident->symbol]
    (reduce (fn [acc block-item]
-             (let [v (resolve-block-item block-item (:identifier-map acc))]
+             (let [v (resolve-block-item block-item (:ident->symbol acc))]
                {:block (conj (:block acc) (:block-item v))
-                :identifier-map (:identifier-map v)}))
+                :ident->symbol (:ident->symbol v)}))
            {:block []
-            :identifier-map identifier-map}
+            :ident->symbol ident->symbol}
            block)))
 
 (defn- annotate-label [m l]
@@ -244,87 +324,201 @@
 
 (defn- typecheck-exp
   "Returns the expression itself, after typechecking all subexpressions."
-  [{:keys [exp-type] :as e} decl-name->symbol]
+  [{:keys [exp-type] :as e} ident->symbol]
   (condp = exp-type
     :constant-exp e
     :variable-exp (let [identifier (:identifier e)
-                        variable-type (:variable-type (get decl-name->symbol identifier))
-                        _ (when  (not (= :int variable-type))
-                            (throw (ex-info "Analyzer Error. Function name used as variable." {:exp e})))]
+                        var? (= :variable (:type (get ident->symbol identifier)))
+                        _ (when (not var?)
+                            (exc/analyzer-error "Function name used as variable." {:exp e :ident->symbol ident->symbol}))]
                     e)
     :assignment-exp (do
-                      (typecheck-exp (:left e) decl-name->symbol)
-                      (typecheck-exp (:right e) decl-name->symbol)
+                      (typecheck-exp (:left e) ident->symbol)
+                      (typecheck-exp (:right e) ident->symbol)
                       e)
     :binary-exp (do
-                  (typecheck-exp (:left e) decl-name->symbol)
-                  (typecheck-exp (:right e) decl-name->symbol)
+                  (typecheck-exp (:left e) ident->symbol)
+                  (typecheck-exp (:right e) ident->symbol)
                   e)
     :unary-exp (do
-                 (typecheck-exp (:value e) decl-name->symbol)
+                 (typecheck-exp (:value e) ident->symbol)
                  e)
     :conditional-exp (do
-                       (typecheck-exp (:left e) decl-name->symbol)
-                       (typecheck-exp (:right e) decl-name->symbol)
-                       (typecheck-exp (:middle e) decl-name->symbol)
+                       (typecheck-exp (:left e) ident->symbol)
+                       (typecheck-exp (:right e) ident->symbol)
+                       (typecheck-exp (:middle e) ident->symbol)
                        e)
-    :function-call-exp (let [symbol (decl-name->symbol (:identifier e))
-                             _ (when (= :int (:variable-type symbol))
+    :function-call-exp (let [symbol (ident->symbol (:identifier e))
+                             _ (when (not= :function (:type symbol))
                                  (throw (ex-info "Analyzer Error. Variable used as function name." {:exp e})))
-                             _ (when (not (= (count (:arguments e)) (:param-count symbol)))
+                             _ (when (not= (count (:arguments e)) (:param-count symbol))
                                  (throw (ex-info "Analyzer Error. Function called with the wrong number of arguments." {:exp e})))
-                             _ (map #(typecheck-exp % decl-name->symbol) (:arguments e))]
+                             _ (map #(typecheck-exp % ident->symbol) (:arguments e))]
                          e)
     (throw (ex-info "Analyzer error. Invalid expression type passed to typechecker." {:exp e}))))
 
-(defn- variable-symbol [variable-type]
-  {:variable-type variable-type})
 
-(defn- function-symbol [param-count defined?]
-  {:param-count param-count
-   :defined? defined?})
+(defn- fun-attrs [defined? global?]
+  {:type :fun
+   :defined? defined?
+   :global? global?})
 
-(defn- add-parameters [params decl-name->symbol]
-  (if (= 0 (count params))
-    decl-name->symbol
+(defn- static-attrs [initial-value global?]
+  {:type :static
+   :initial-value initial-value
+   :global? global?})
+
+(defn- local-attrs []
+  {:type :local})
+
+(defn- variable-symbol [variable-type attrs]
+  {:type :variable
+   :variable-type variable-type
+   :attrs attrs})
+
+(defn- function-symbol [param-count attrs]
+  {:type :function
+   :param-count param-count
+   :attrs attrs})
+
+(defn- add-parameters [params ident->symbol]
+  (if (zero? (count params))
+    ident->symbol
     (apply assoc
-           decl-name->symbol
-             (flatten (map (fn [p] [(:identifier p) (variable-symbol :int)]) params)))))
+           ident->symbol
+           (flatten (map (fn [p] [(:identifier p) (variable-symbol :int (local-attrs))]) params)))))
 
 (declare typecheck-block)
 
-(defn- typecheck-declaration [{:keys [declaration-type identifier] :as d} decl-name->symbol]
-  (condp = declaration-type
-    :variable (let [updated-decl-name->symbol (assoc decl-name->symbol identifier (variable-symbol :int))
-                    _ (when (:initial d) (typecheck-exp (:initial d) updated-decl-name->symbol))]
-                {:declaration d
-                 :decl-name->symbol updated-decl-name->symbol})
-    :function (let [param-count (count (:parameters d))
-                    has-body? (not (empty? (:body d)))
-                    previously-declared? (contains? decl-name->symbol identifier)
-                    _ (when previously-declared?
-                        (let [old-symbol (get decl-name->symbol identifier)
-                              _ (when (not= param-count (:param-count old-symbol))
-                                  (throw (ex-info "Analyzer Error. Incompatible function declarations." {:declaration d})))
-                              _ (when (and (:defined? old-symbol) has-body?)
-                                  (throw (ex-info "Analyzer Error. Function is defined more than once." {:declaration d})))]))
-                    updated-decl-name->symbol (assoc decl-name->symbol
-                                                     identifier
-                                                     (function-symbol param-count (or (:defined? (get decl-name->symbol identifier)) has-body?)))]
-                (if has-body?
-                  (let [with-parameters-symbols (add-parameters (:parameters d) updated-decl-name->symbol)
-                        with-body-symbols (typecheck-block (:body d) with-parameters-symbols)]
-                   {:declaration d
-                    :decl-name->symbol (:decl-name->symbol with-body-symbols)})
-                  {:declaration d
-                   :decl-name->symbol updated-decl-name->symbol}))
-    (throw (ex-info "Analyzer Error. Invalid declaration for typechecker." {:declaration d}))))
+(defn- validate-fn-decl-and-return-updated-attrs
+  [cur-decl old-decl]
+  (let [param-count (count (:parameters cur-decl))
+        old-param-count (:param-count old-decl)
+        has-body? (seq (:body param-count))
+        _ (when (not= param-count old-param-count)
+            (exc/analyzer-error "Incompatible function declarations." {:declaration1 old-decl
+                                                                       :declaration2 cur-decl}))
+        defined? (:defined? (:attrs old-decl))
+        _ (when (and defined? has-body?)
+            (exc/analyzer-error "Function is defined more than once." {:declaration cur-decl}))
+        old-global? (:global? (:attrs old-decl))
+        _ (when (and old-global? (= :static (:storage-class cur-decl)))
+            (exc/analyzer-error "Static function definition follows non static." {:declaration cur-decl}))]
+    {:defined? defined?
+     :global? old-global?}))
+
+(defn- typecheck-function-declaration
+  [{:keys [identifier parameters body storage-class] :as decl} ident->symbol]
+  (let [param-count (count parameters)
+        body? (seq body)
+        old-decl (get ident->symbol identifier)
+        {defined? :defined?
+         global? :global?} (if old-decl
+                             (validate-fn-decl-and-return-updated-attrs decl old-decl)
+                             {:defined? false
+                              :global? (not= :static storage-class)})
+        attrs (fun-attrs (or defined? (boolean body?)) global?)
+        updated-symbol-map (assoc ident->symbol identifier
+                                  (function-symbol param-count attrs))]
+    (if body?
+      (let [with-parameter-symbols (add-parameters parameters updated-symbol-map)
+            with-body-symbols (typecheck-block body (assoc with-parameter-symbols
+                                                           :at-top-level false))]
+        {:declaration decl
+         :ident->symbol (assoc (:ident->symbol with-body-symbols) :at-top-level true)})
+      {:declaration decl
+       :ident->symbol updated-symbol-map})))
+
+(defn- get-initial-value [decl]
+  (cond
+    (= :constant-exp (:exp-type (:initial decl))) {:type :initial
+                                                   :value (:value (:initial decl))}
+    (nil? (:initial decl))    (if (= :extern (:storage-class decl))
+                                {:type :no-initializer}
+                                {:type :tentative})
+    :else (exc/analyzer-error "Non-constant initializer!" decl)))
+
+(defn- validate-file-scope-decl-return-attrs [cur-decl old-decl]
+  (let [_ (when (not= :variable (:declaration-type old-decl))
+            (exc/analyzer-error "Function redeclared as variable." {:declaration1 old-decl
+                                                                    :declaration2 cur-decl}))
+        global? (not= :static (:storage-class cur-decl))
+        global? (cond
+                  (= :extern (:storage-class cur-decl)) (:global? (:attrs old-decl))
+                  (not= global? (:global? (:attrs old-decl))) (exc/analyzer-error "Conflicting variable linkage." {:declaration1 old-decl
+                                                                                                                   :declaration2 cur-decl})
+                  :else global?)
+        initial-value (get-initial-value cur-decl)
+        initial-value (cond
+                        (=
+                         :initial
+                         (get-in old-decl [:attrs :initial-value :type])) (if (= (:type initial-value) :initial)
+                                                                            (exc/analyzer-error "Conflivting file scope variable definition." {:declarartion1 old-decl
+                                                                                                                                               :declaration2 cur-decl})
+                                                                            (get-in old-decl [:attrs :initial-value]))
+                        (and
+                         (= :tentative (get-in old-decl [:attrs :initial-value :type]))
+                         (not= :initial (:type initial-value))) {:type :tentative}
+                        :else initial-value)]
+    {:global? global?
+     :initial-value initial-value}))
+
+(defn- typecheck-file-scope-variable-declaration
+  [{:keys [identifier storage-class ] :as d} ident->symbol]
+  (let [old-decl (get ident->symbol identifier)
+        global? (not= :static storage-class)
+        initial-value (get-initial-value d)
+        {global? :global?
+         initial-value :initial-value} (if old-decl
+                                         (validate-file-scope-decl-return-attrs d old-decl)
+                                         {:global? global?
+                                          :initial-value initial-value})]
+    {:declaration d
+     :ident->symbol (assoc ident->symbol
+                           identifier
+                           (variable-symbol :int (static-attrs initial-value global?)))}))
+
+(defn- typecheck-local-scope-variable-declaration
+  [{:keys [identifier storage-class initial] :as d} ident->symbol]
+  (cond
+    (= :extern storage-class) (let [_ (when (not (nil? initial))
+                                        (exc/analyzer-error "Initializer on local extern variable declaration." d))
+                                    old-decl (get ident->symbol identifier)
+                                    _ (when (and old-decl (not= :variable (:declaration-type old-decl)))
+                                        (exc/analyzer-error "Function redeclared as variable." {:declaration1 old-decl
+                                                                                                :declaration2 d}))]
+                                {:declaration d
+                                 :ident->symbol (assoc ident->symbol
+                                                       identifier
+                                                       (variable-symbol :int (static-attrs {:type :no-initializer} true)))})
+    (= :static storage-class) (let [initial-value (cond
+                                                    (= :constant-exp (:exp-type initial)) {:type :initial
+                                                                                           :value (:value initial)}
+                                                    (nil? initial) {:type :initial
+                                                                    :value 0}
+                                                    :else (exc/analyzer-error "Non-constant initializer on local static variable." d))]
+                                {:declaration d
+                                 :ident->symbol (assoc ident->symbol
+                                                       identifier
+                                                       (variable-symbol :int (static-attrs initial-value false)))})
+    :else (let [updated-symbols (assoc ident->symbol identifier (variable-symbol :int (local-attrs)))
+                _ (when initial (typecheck-exp initial updated-symbols))]
+            {:declaration d
+             :ident->symbol updated-symbols})))
+
+(defn- typecheck-declaration [{:keys [declaration-type identifier] :as d} ident->symbol]
+  (let [at-top-level? (:at-top-level ident->symbol)]
+   (condp = declaration-type
+     :variable (if at-top-level?
+                 (typecheck-file-scope-variable-declaration d ident->symbol)
+                 (typecheck-local-scope-variable-declaration d ident->symbol))
+     :function (typecheck-function-declaration d ident->symbol)
+     (throw (ex-info "Analyzer Error. Invalid declaration for typechecker." {:declaration d})))))
 
 (defn- typecheck-optional-expression [e decl-name->symbol]
   (if (nil? e)
     e
     (typecheck-exp e decl-name->symbol)))
-
 
 (defn- typecheck-for-init [for-init decl-name->symbol]
   (if (= (:type for-init) :declaration)
@@ -373,25 +567,33 @@
     :empty s
     (throw (ex-info "Analyzer Error. Invalid statement type in typechecker." {:statement s}))))
 
-(defn- typecheck-item [{:keys [type] :as item} decl-name->symbol]
+(defn- typecheck-item [{:keys [type] :as item} ident->symbol]
   (condp = type
-    :declaration (let [v (typecheck-declaration item decl-name->symbol)]
+    :declaration (let [v (typecheck-declaration item ident->symbol)]
                    {:block-item (:declaration v)
-                    :decl-name->symbol (:decl-name->symbol v)})
-    :statement {:block-item (typecheck-statement item decl-name->symbol)
-                :decl-name->symbol decl-name->symbol}
-    (throw (ex-info "Analyzer Error. Invalid statement/declaration." {item item}))))
+                    :ident->symbol (:ident->symbol v)})
+    :statement {:block-item (typecheck-statement item ident->symbol)
+                :ident->symbol ident->symbol}
+    (exc/analyzer-error "Invalid statement/declaration." {item item})))
 
 (defn- typecheck-block
+  "Typechecks a block with a given symbol table.
+
+  ident->symbol holds identifier to symbol mapping.
+  Symbol contains the type information, generated variable name etc.
+
+  | key            | description |
+  |----------------|-------------|
+  |`:at-top-level` | Is current level top or not ( default true)|"
   ([block]
-   (typecheck-block block {}))
-  ([block decl-name->symbol]
+   (typecheck-block block {:at-top-level true}))
+  ([block ident->symbol]
    (reduce (fn [acc item]
-             (let [v (typecheck-item item (:decl-name->symbol acc))]
+             (let [v (typecheck-item item (:ident->symbol acc))]
                {:block (conj (:block acc) (:block-item v))
-                :decl-name->symbol (:decl-name->symbol v)}))
+                :ident->symbol (:ident->symbol v)}))
            {:block []
-            :decl-name->symbol decl-name->symbol}
+            :ident->symbol ident->symbol}
            block)))
 
 (defn validate [ast]
@@ -409,16 +611,22 @@
 
 (comment
 
-  (pp/pprint
    (validate-from-src
     "
-int foo(void);
-int main(void) {
-return foo();
+int twice(int x){
+    return 2 * x;
 }
-int foo(void) {
-return 3;
-}
-"))
+")
 
-  ())
+ (validate-from-src
+  "
+int main(void) {
+    int a = 3;
+    {
+        int a = a = 4;
+        return a;
+    }
+}
+")
+
+ ())

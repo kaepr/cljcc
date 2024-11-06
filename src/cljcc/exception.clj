@@ -7,3 +7,6 @@
 
 (defn parser-error [msg data]
   (throw (ex-info msg (merge {:error/type :parser} data))))
+
+(defn analyzer-error [msg data]
+  (throw (ex-info msg (merge {:error/type :analyzer} data))))

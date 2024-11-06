@@ -26,11 +26,6 @@
           [_ tokens] (expect end-kind tokens)]
       [e tokens])))
 
-(defn- keyword->type [k]
-  (condp = k
-    :kw-int "int"
-    (throw (ex-info "Parser Error. Unsupported type." {:keyword k}))))
-
 (defn- expect
   "Expects the first token in list to be of given kind.
 
