@@ -633,6 +633,9 @@ int twice(int x){
 
   (validate-from-src
    "
+int static y = 10;
+extern int x = 0;
+
 int main(void) {
 return 2;
 }

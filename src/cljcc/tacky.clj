@@ -367,7 +367,7 @@
     :declaration (declaration->tacky-instruction item)
     (throw (ex-info "Tacky error. Invalid block item." {:item item}))))
 
-(defn- function-definition->tacky-function [function-definition]
+(defn- function-definition->tacky-function [function-definition ident->symbol]
   (let [add-return (fn [xs] (conj (vec xs) (return-instruction (constant 0))))
         instructions (->> function-definition
                           :body
@@ -378,14 +378,45 @@
                           add-return)]
     (-> function-definition
         (dissoc :body)
+        (assoc :global? (get-in ident->symbol [(:identifier function-definition)
+                                               :attrs
+                                               :global?]))
         (assoc :instructions instructions))))
 
-(defn tacky-generate [{ast :block symbols :decl-name->symbol}]
-  (let [_ (symbols/reset-symbols symbols)
-        defined? (fn [x] (or (= (:identifier x) "main") (seq (:body x))))]
-   (->> ast
-       (filter defined?)
-       (map function-definition->tacky-function))))
+(defn- tacky-static-variable [identifier global? initial-value]
+  {:identifier identifier
+   :global? global?
+   :initial-value initial-value
+   :type :declaration
+   :declaration-type :static-variable})
+
+(defn- tacky-static-variable-instructions [ident->symbols]
+  (reduce
+   (fn [acc [k v]]
+     (if (string? k)
+       (if (= :static (get-in v [:attrs :type]))
+         (condp = (get-in v [:attrs :initial-value :type])
+           :initial (conj acc (tacky-static-variable k (get-in v [:attrs :global?]) (get-in v [:attrs :initial-value :value])))
+           :tentative (conj acc (tacky-static-variable k (get-in v [:attrs :global?]) 0))
+           acc)
+         acc)
+       acc))
+   []
+   ident->symbols))
+
+(defn- tacky-function-instructions [ast ident->symbol]
+  (let [fn-defined? (fn [x] (if (= :function (:declaration-type x))
+                              (or (= (:identifier x) "main") (seq (:body x)))
+                              true))]
+    (->> ast
+         (filter #(= :function (:declaration-type %)))
+         (filter fn-defined?)
+         (map #(function-definition->tacky-function % ident->symbol)))))
+
+(defn tacky-generate [{ast :block ident->symbol :ident->symbol}]
+  (let [variable-instructions (tacky-static-variable-instructions ident->symbol)
+        function-instructions (tacky-function-instructions ast ident->symbol)]
+    (concat variable-instructions function-instructions)))
 
 (defn tacky-from-src [src]
   (-> src
@@ -396,18 +427,15 @@
 
 (comment
 
-   (tacky-from-src
-    "
+  (tacky-from-src
+   "
+static int x;
+
 int foo(int a) {
 return a + 1;
 }
 
-int main (void) {
-int y = 5;
-int x = foo(10);
-return x;
-
-}")
+")
 
   (pp/pprint
    (tacky-generate
