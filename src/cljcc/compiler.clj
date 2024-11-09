@@ -1,6 +1,5 @@
 (ns cljcc.compiler
   (:require [cljcc.parser :as p]
-            [clojure.pprint :as pp]
             [cljcc.tacky :as t]
             [cljcc.lexer :as l]
             [cljcc.analyzer :as a]

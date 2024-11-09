@@ -525,7 +525,6 @@
     (typecheck-declaration for-init ident->symbol)
     (typecheck-optional-expression for-init ident->symbol)))
 
-;; TODO: typechecking must thread through all recursive typecheck statement
 (defn- typecheck-statement [{:keys [statement-type] :as s} ident->symbol]
   (condp = statement-type
     :return (do
@@ -537,41 +536,40 @@
                   {:statement s
                    :ident->symbol ident->symbol})
     :if (if (:else-statement s)
-          (do
-            (typecheck-exp (:condition s) ident->symbol)
-            (typecheck-statement (:then-statement s) ident->symbol)
-            (typecheck-statement (:else-statement s) ident->symbol)
+          (let
+            [_ (typecheck-exp (:condition s) ident->symbol)
+             {i->s :ident->symbol} (typecheck-statement (:then-statement s) ident->symbol)
+             {i->s :ident->symbol} (typecheck-statement (:else-statement s) i->s)]
             {:statement s
-             :ident->symbol ident->symbol})
-          (do
-            (typecheck-exp (:condition s) ident->symbol)
-            (typecheck-statement (:then-statement s) ident->symbol)
+             :ident->symbol i->s})
+          (let
+            [_ (typecheck-exp (:condition s) ident->symbol)
+             {i->s :ident->symbol} (typecheck-statement (:then-statement s) ident->symbol)]
             {:statement s
-             :ident->symbol ident->symbol}))
+             :ident->symbol i->s}))
     :break {:statement s
             :ident->symbol ident->symbol}
     :continue {:statement s
                :ident->symbol ident->symbol}
-    :while (do
-             (typecheck-exp (:condition s) ident->symbol)
-             (typecheck-statement (:body s) ident->symbol)
+    :while (let
+             [_ (typecheck-exp (:condition s) ident->symbol)
+              {i->s :ident->symbol} (typecheck-statement (:body s) ident->symbol)]
              {:statement s
-              :ident->symbol ident->symbol})
-    :do-while (do
-                (typecheck-exp (:condition s) ident->symbol)
-                (typecheck-statement (:body s) ident->symbol)
+              :ident->symbol i->s})
+    :do-while (let
+                [_ (typecheck-exp (:condition s) ident->symbol)
+                 {i->s :ident->symbol} (typecheck-statement (:body s) ident->symbol)]
                 {:statement s
-                 :ident->symbol ident->symbol})
+                 :ident->symbol i->s})
     :for (let [f-init (typecheck-for-init (:init s) ident->symbol)
                updated-symbols (if (:declaration f-init)
                                  (:ident->symbol f-init)
                                  ident->symbol)
                _ (typecheck-optional-expression (:condition s) updated-symbols)
                _ (typecheck-optional-expression (:post s) updated-symbols)
-               _ (typecheck-statement (:body s) updated-symbols)]
+               {i->s :ident->symbol} (typecheck-statement (:body s) updated-symbols)]
            {:statement s
-            :ident->symbol ident->symbol})
-    ;; TODO: Standardize returning map from statements
+            :ident->symbol i->s})
     :compound (let [v (typecheck-block (:block s) ident->symbol)]
                 {:statement s
                  :ident->symbol (:ident->symbol v)})
@@ -637,6 +635,7 @@ int static y = 10;
 extern int x = 0;
 
 int main(void) {
+int z = 100;
 return 2;
 }
 ")

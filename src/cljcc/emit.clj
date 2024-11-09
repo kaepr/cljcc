@@ -1,10 +1,9 @@
 (ns cljcc.emit
-  (:require [cljcc.parser :as p]
-            [cljcc.util :refer [get-os]]
-            [cljcc.compiler :as c]
-            [clojure.string :as str]
-            [clojure.pprint :as pp]
-            [cljcc.symbols :as symbols]))
+  (:require
+   [cljcc.util :refer [get-os]]
+   [cljcc.compiler :as c]
+   [clojure.string :as str]
+   [cljcc.symbols :as symbols]))
 
 (defn- handle-label [identifier]
   (condp = (get-os)
@@ -12,15 +11,14 @@
     :linux (str ".L" identifier)
     (throw (ex-info "Error in generating label." {}))))
 
-
-(defn- handle-function-name [name]
+(defn- handle-symbol-name [name]
   (if (= :mac (get-os))
     (str "_" name)
     name))
 
 (defn- handle-current-translation-unit [name]
   (if (= :mac (get-os))
-    (handle-function-name name)
+    (handle-symbol-name name)
     (if (contains? @symbols/symbols name)
       name
       (str name "@PLT"))))
@@ -32,6 +30,9 @@
 
 (defn- stack-operand-emit [operand _opts]
   (format "%d(%%rbp)" (:value operand)))
+
+(defn- data-operand-emit [operand _opts]
+  (format "%s(%%rip)" (handle-symbol-name (:identifier operand))))
 
 (defn- register-operand [{:keys [register] :as operand} {register-width :register-width :or {register-width :4-byte}}]
   (let [register->width->output {:ax {:8-byte "%rax"
@@ -80,6 +81,7 @@
   "Map of assembly operands to operand emitters."
   {:imm #'imm-opernad-emit
    :reg #'register-operand
+   :data #'data-operand-emit
    :stack #'stack-operand-emit})
 
 (defn- operand-emit
@@ -188,18 +190,40 @@
     (instruction-emit-fn instruction)
     (throw (AssertionError. (str "Invalid instruction: " instruction)))))
 
-(defn function-definition-emit [f]
-  (let [name (handle-function-name (:identifier f))
-        globl (format "    .globl %s", name)
+(defn function-definition-emit [{:keys [identifier instructions global?]}]
+  (let [name (handle-symbol-name identifier)
+        globl (if global?
+                (format "    .globl %s", name)
+                "")
         name-line (format "%s:" name)
-        instructions (map instruction-emit (:instructions f))]
-    (flatten [globl
-              name-line
-              "    pushq       %rbp"
-              "    movq        %rsp, %rbp"
-              instructions])))
+        instructions (mapv instruction-emit instructions)]
+    (->> [globl
+          "    .text"
+          name-line
+          "    pushq       %rbp"
+          "    movq        %rsp, %rbp"
+          instructions
+          "\n"]
+         flatten
+         (filterv not-empty))))
 
-(defn- static-variable-definition-emit [{:keys [identifier global? initial-value]}])
+(defn- static-variable-definition-emit [{:keys [identifier global? initial-value]}]
+  (let [name (handle-symbol-name identifier)
+        globl (if global?
+                (format "    .globl %s" name)
+                "")
+        data-or-bss (if (zero? initial-value)
+                      "    .bss"
+                      "    .data")
+        size-val (if (zero? initial-value)
+                   "    .zero 4"
+                   (format "    .long %d" initial-value))]
+    (filterv not-empty [globl
+                        data-or-bss
+                        "    .balign 4"
+                        (format "%s:" name)
+                        size-val
+                        "\n"])))
 
 (def emitters-top-level
   "Map of assembly top level constructs to their emitters."
@@ -216,20 +240,20 @@
 (defn emit [top-levels]
   (let [handle-os (fn [ast]
                     (if (= :linux (get-os))
-                      (conj (conj (vec ast) linux-assembly-end) "\n")
-                      (conj ast "\n")))]
+                      (conj (conj (vec ast) linux-assembly-end))
+                      ast))]
     (->> top-levels
-         (map emit-top-level)
+         (mapv emit-top-level)
          concat
          flatten
          handle-os
-         (str/join "\n\n"))))
+         (str/join "\n"))))
 
 (comment
 
-   (emit
-    (c/generate-assembly
-     "int main(void) {
+  (emit
+   (c/generate-assembly
+    "int main(void) {
      return ~(-(~(-1)));
     }"))
 

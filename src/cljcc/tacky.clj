@@ -1,11 +1,10 @@
 (ns cljcc.tacky
   (:require
-   [clojure.pprint :as pp]
    [cljcc.lexer :as l]
    [cljcc.util :as u]
    [cljcc.parser :as p]
-   [cljcc.analyzer :as a]
-   [cljcc.symbols :as symbols]))
+   [cljcc.analyzer :as a]))
+   
 
 (defn- variable
   ([]
@@ -357,9 +356,12 @@
 
 (defn- declaration->tacky-instruction [d]
   (when (:initial d)
-    (let [var (parsed-var->tacky-var d) ; only needs :identifier key in declaration
+    (let [local? (nil? (:storage-class d))
+          var (parsed-var->tacky-var d) ; only needs :identifier key in declaration
           rhs (exp-instructions (:initial d))]
-      (flatten [(:instructions rhs) (copy-instruction (:val rhs) var)]))))
+      (if local?
+        (flatten [(:instructions rhs) (copy-instruction (:val rhs) var)])
+        [])))) ; ignoring initializers for non local variable declarations
 
 (defn- block-item->tacky-instruction [item]
   (condp = (:type item)
@@ -430,30 +432,20 @@
 
   (tacky-from-src
    "
-static int x;
+extern int foo;
 
-extern int y = 100;
+int foo;
 
-int foo(int a) {
-int b = a;
-int z = 78 - 1;
-return z;
+int foo;
+
+int main(void) {
+    for (int i = 0; i < 5; i = i + 1)
+        foo = foo + 1;
+    return foo;
 }
 
+int foo;
+
 ")
-
-  (pp/pprint
-   (tacky-generate
-    (p/parse (l/lex "int main(void) {
-int a = 1;
-return 1;}"))))
-
-  (pp/pprint
-   (tacky-generate
-    (p/parse (l/lex "int main(void) {return 1 * -2 / ~3 * (4 - 5);}"))))
-
-  (pp/pprint
-   (tacky-generate
-    (p/parse (l/lex "int main(void) {return (1 + 2) || (3 + 4);}"))))
 
   ())
