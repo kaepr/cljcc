@@ -199,28 +199,31 @@
               "    movq        %rsp, %rbp"
               instructions])))
 
+(defn- static-variable-definition-emit [{:keys [identifier global? initial-value]}])
+
 (def emitters-top-level
   "Map of assembly top level constructs to their emitters."
-  {:declaration #'function-definition-emit})
+  {:function #'function-definition-emit
+   :static-variable #'static-variable-definition-emit})
 
-(defn emit-top-level [assembly-ast]
-  (if-let [[_ emit-fn] (find emitters-top-level (:op assembly-ast))]
-    (emit-fn assembly-ast)
-    (throw (AssertionError. (str "Invalid ast: " assembly-ast)))))
+(defn emit-top-level [tacky-ast]
+  (if-let [[_ emit-fn] (find emitters-top-level (:type tacky-ast))]
+    (emit-fn tacky-ast)
+    (throw (AssertionError. (str "Invalid ast: " tacky-ast)))))
 
 (def linux-assembly-end ".section .note.GNU-stack,\"\",@progbits")
 
-(defn emit [ast]
+(defn emit [top-levels]
   (let [handle-os (fn [ast]
                     (if (= :linux (get-os))
                       (conj (conj (vec ast) linux-assembly-end) "\n")
                       (conj ast "\n")))]
-    (->> ast
+    (->> top-levels
          (map emit-top-level)
          concat
          flatten
          handle-os
-         (str/join "\n"))))
+         (str/join "\n\n"))))
 
 (comment
 

@@ -223,11 +223,11 @@
                      (label-instruction end-label)])}))
 
 (defn- function-call-exp-handler [{identifier :identifier arguments :arguments}]
-  (let [arg-exps (map expression-handler arguments)
+  (let [arg-exps (mapv expression-handler arguments)
         dst (variable (str "function_call_result_" identifier))
-        fn-instruction (fun-call-instruction identifier (map #(:val %) arg-exps) dst)]
+        fn-instruction (fun-call-instruction identifier (mapv #(:val %) arg-exps) dst)]
     {:val dst
-     :instructions (flatten [(map #(:instructions %) arg-exps) fn-instruction])}))
+     :instructions (flatten [(mapv #(:instructions %) arg-exps) fn-instruction])}))
 
 (defn- expression-handler [e]
   (when-let [exp-type (:exp-type e)]
@@ -272,7 +272,7 @@
        (label-instruction end-label)])))
 
 (defn- compound-statement-handler [s]
-  (flatten (map block-item->tacky-instruction (:block s))))
+  (flatten (mapv block-item->tacky-instruction (:block s))))
 
 (defn- break-statement-handler [s]
   [(jump-instruction (str "break_" (:label s)))])
@@ -372,7 +372,7 @@
         instructions (->> function-definition
                           :body
                           (remove nil?)
-                          (map block-item->tacky-instruction)
+                          (mapv block-item->tacky-instruction)
                           flatten
                           (remove nil?)
                           add-return)]
@@ -409,14 +409,15 @@
                               (or (= (:identifier x) "main") (seq (:body x)))
                               true))]
     (->> ast
-         (filter #(= :function (:declaration-type %)))
-         (filter fn-defined?)
-         (map #(function-definition->tacky-function % ident->symbol)))))
+         (filterv #(= :function (:declaration-type %)))
+         (filterv fn-defined?)
+         (mapv #(function-definition->tacky-function % ident->symbol)))))
 
 (defn tacky-generate [{ast :block ident->symbol :ident->symbol}]
   (let [variable-instructions (tacky-static-variable-instructions ident->symbol)
         function-instructions (tacky-function-instructions ast ident->symbol)]
-    (concat variable-instructions function-instructions)))
+    {:program (concat variable-instructions function-instructions)
+     :ident->symbol ident->symbol}))
 
 (defn tacky-from-src [src]
   (-> src
@@ -431,8 +432,12 @@
    "
 static int x;
 
+extern int y = 100;
+
 int foo(int a) {
-return a + 1;
+int b = a;
+int z = 78 - 1;
+return z;
 }
 
 ")

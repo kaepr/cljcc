@@ -10,3 +10,6 @@
 
 (defn analyzer-error [msg data]
   (throw (ex-info msg (merge {:error/type :analyzer} data))))
+
+(defn compiler-error [msg data]
+  (throw (ex-info msg (merge {:error/type :compiler} data))))

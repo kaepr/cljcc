@@ -3,7 +3,8 @@
             [clojure.pprint :as pp]
             [cljcc.tacky :as t]
             [cljcc.lexer :as l]
-            [cljcc.analyzer :as a]))
+            [cljcc.analyzer :as a]
+            [cljcc.exception :as exc]))
 
 (def registers #{:ax :dx :di :si :r8 :r9 :r10 :r11 :cx :cl})
 
@@ -103,6 +104,16 @@
    :operand-type :pseudo
    :identifier identifier})
 
+(defn- data-operand [identifier]
+  {:operand :data
+   :operand-type :data
+   :identifier identifier})
+
+(defn- memory-address? [operand]
+  (or (contains? #{:data :stack} operand) ;; TODO: remove this check once refactored
+      (contains? #{:data :stack} (:operand operand))
+      (contains? #{:data :stack} (:operand-type operand))))
+
 ;;;; Tacky -> Instructions
 
 (defn- tacky-val->assembly-operand [{:keys [type value]}]
@@ -196,7 +207,7 @@
     (->> register-args
          (interleave argument-passing-registers)
          (partition 2)
-         (map arg-mov-instruction)
+         (mapv arg-mov-instruction)
          flatten)))
 
 (defn- pass-args-on-stack-instructions
@@ -214,7 +225,7 @@
                                    (push-instruction (reg-operand :ax))])))]
     (->> stack-args
          reverse
-         (map arg-mov-instruction)
+         (mapv arg-mov-instruction)
          flatten
          (remove nil?))))
 
@@ -253,7 +264,7 @@
   (let [transformer-fn ((:type inst) tacky->assembly-transformers)]
     (transformer-fn inst)))
 
-(defn- find-pseudo-values
+(defn- find-pseudo-identifiers
   "Returns list of identifiers for pseudo operands.
 
   Drills into each instruction. Collects identifier from any pseudo operand."
@@ -270,16 +281,16 @@
                                       []
                                       operand-keys-in-instruction))]
     (->> instructions
-         (map instruction->pseudo-values)
+         (mapv instruction->pseudo-values)
          flatten
          (remove nil?)
          distinct)))
 
-(defn- create-pseudo-value-map
-  "Returns a map from pseudo identifiers.
+(defn- pseudo-identifier-to-stack-address
+  "Returns a map from pseudo identifiers to stack address in memory.
 
-  Assigns each identifier values, corresponding to memory addresses in stack."
-  [pseudo-values]
+  Assigns each identifier subsequent lower memory addresses in stack."
+  [pseudo-identifiers]
   (reduce
    (fn [acc cur]
      (let [exists? (contains? acc cur)
@@ -288,26 +299,45 @@
          acc
          (assoc acc cur (- v 4) "current" (- v 4)))))
    {"current" 0}
-   pseudo-values))
+   pseudo-identifiers))
 
-(defn- pseudo->stack-operand-instruction [pseudo-value->stack-value instruction]
-  (let [pseudo-operand? (fn [inst path] (= :pseudo (get-in inst [path :operand-type])))
-        replace-pseudo (fn [inst path]
-                         (if (pseudo-operand? inst path)
-                           (let [v (get-in inst [path :identifier])
-                                 sv (get pseudo-value->stack-value v)]
-                             (assoc inst path (stack-operand sv)))
-                           inst))]
+(defn- pseudo->data-operand-instruction [ident->symbol instruction]
+  (let [pseudo-data-operand? (fn [inst path]
+                               (let [operand (get-in inst [path])
+                                     operand-type (:operand-type operand)
+                                     identifier (:identifier operand)]
+                                (and
+                                 (= :pseudo operand-type)
+                                 (contains? ident->symbol identifier)
+                                 (= :static (get-in ident->symbol [identifier :attrs :type])))))
+        replace-pseudo-with-data-op (fn [inst path]
+                                      (if (pseudo-data-operand? inst path)
+                                        (assoc inst path (data-operand (get-in inst [path :identifier])))
+                                        inst))]
     (-> instruction
-        (replace-pseudo :src)
-        (replace-pseudo :dst)
-        (replace-pseudo :operand))))
+        (replace-pseudo-with-data-op :src)
+        (replace-pseudo-with-data-op :dst)
+        (replace-pseudo-with-data-op :operand))))
 
-(defn- replace-pseudoregisters [instructions]
-  (let [pseudo-values (find-pseudo-values instructions)
-        pseudo-value-map (create-pseudo-value-map pseudo-values)]
-    {:max-stack-val  (get pseudo-value-map "current")
-     :instructions (map #(pseudo->stack-operand-instruction pseudo-value-map %) instructions)}))
+(defn- pseudo->stack-operand-instruction [pseudo-ident->stack-address instruction]
+  (let [pseudo-operand? (fn [inst path] (= :pseudo (get-in inst [path :operand-type])))
+        replace-pseudo-with-stack-op (fn [inst path]
+                                       (if (pseudo-operand? inst path)
+                                         (let [v (get-in inst [path :identifier])
+                                               sv (get pseudo-ident->stack-address v)]
+                                           (assoc inst path (stack-operand sv)))
+                                         inst))]
+    (-> instruction
+        (replace-pseudo-with-stack-op :src)
+        (replace-pseudo-with-stack-op :dst)
+        (replace-pseudo-with-stack-op :operand))))
+
+(defn- replace-pseudoregisters [instructions ident->symbol]
+  (let [instructions-with-data-ops (mapv #(pseudo->data-operand-instruction ident->symbol %) instructions)
+        pseudo-identifiers (find-pseudo-identifiers instructions-with-data-ops)
+        pseudo-ident->stack-address (pseudo-identifier-to-stack-address pseudo-identifiers)]
+    {:max-stack-val  (get pseudo-ident->stack-address "current")
+     :instructions (mapv #(pseudo->stack-operand-instruction pseudo-ident->stack-address %) instructions-with-data-ops)}))
 
 (defn- fix-binary-instruction [instruction]
   (let [binop (:binary-operator instruction)
@@ -315,15 +345,15 @@
         dst (:dst instruction)
         mul? (= binop :mul)]
     (if mul?
-      (let [dst-memory-address? (= :stack (:operand dst))]
+      (let [dst-memory-address? (memory-address? dst)]
         (if dst-memory-address?
           [(mov-instruction dst (reg-operand :r11))
            (binary-instruction binop src (reg-operand :r11))
            (mov-instruction (reg-operand :r11) dst)]
           instruction))
       (let [both-memory-address? (and
-                                  (= :stack (:operand src))
-                                  (= :stack (:operand dst)))]
+                                  (memory-address? src)
+                                  (memory-address? dst))]
         (if both-memory-address?
           [(mov-instruction src (reg-operand :r10))
            (binary-instruction binop (reg-operand :r10) dst)]
@@ -331,8 +361,8 @@
 
 (defn- fix-mov-instruction [instruction]
   (let [both-memory-address? (and
-                              (= :stack (get-in instruction [:src :operand]))
-                              (= :stack (get-in instruction [:dst :operand])))]
+                              (memory-address? (:src instruction))
+                              (memory-address? (:dst instruction)))]
     (if both-memory-address?
       [(mov-instruction (get instruction :src) (reg-operand :r10))
        (mov-instruction (reg-operand :r10) (get instruction :dst))]
@@ -346,8 +376,8 @@
 
 (defn- fix-cmp-instruction [instruction]
   (let [both-memory-address? (and
-                              (= :stack (get-in instruction [:src :operand]))
-                              (= :stack (get-in instruction [:dst :operand])))
+                              (memory-address? (:src instruction))
+                              (memory-address? (:dst instruction)))
         dst-constant? (= :imm (get-in instruction [:dst :operand]))]
     (cond
       both-memory-address? [(mov-instruction (get instruction :src) (reg-operand :r10))
@@ -387,32 +417,49 @@
   [parameters]
   (let [registers [:di :si :dx :cx :r8 :r9]
         [register-params stack-params] (split-at 6 parameters)
-        reg-args-to-pseudo-instructions (map (fn [reg param]
-                                               [(mov-instruction (reg-operand reg) (pseudo-operand (:identifier param)))])
+        reg-args-to-pseudo-instructions (mapv (fn [reg param]
+                                                [(mov-instruction (reg-operand reg) (pseudo-operand (:identifier param)))])
                                              registers
                                              register-params)
-        stack-args-to-pseudo-instruction (map-indexed (fn [idx param]
-                                                        [(mov-instruction (stack-operand (+ 16 (* 8 idx))) (pseudo-operand (:identifier param)))]) stack-params)]
+        stack-args-to-pseudo-instruction (into [] (map-indexed (fn [idx param]
+                                                                 [(mov-instruction (stack-operand (+ 16 (* 8 idx))) (pseudo-operand (:identifier param)))]) stack-params))]
     (->> [reg-args-to-pseudo-instructions stack-args-to-pseudo-instruction]
          flatten
          (remove nil?))))
 
-(defn- tacky-function->assembly-function [{:keys [type identifier parameters instructions]}]
+(defn- tacky-function->assembly-function
+  [{:keys [global? identifier parameters instructions declaration-type]} ident->symbol]
   (let [parameter-instructions (parameters->assembly-instructions parameters)
         body-instructions (->> instructions
                                (keep tacky-inst->assembly-inst)
                                flatten)]
-    {:op type
+    {:op :function
+     :type declaration-type
      :identifier identifier
+     :global? global?
      :instructions (->> [parameter-instructions body-instructions]
                         flatten
-                        replace-pseudoregisters
+                        ((fn [is] (replace-pseudoregisters is ident->symbol)))
                         add-allocate-stack-instruction
                         (keep fix-instruction)
                         flatten)}))
 
-(defn- tacky-ast->assembly [ast]
-  (map tacky-function->assembly-function ast))
+(defn- tacky-static-variable->assembly-static-variable
+  [{:keys [identifier initial-value global? declaration-type]}]
+  {:op :static-variable
+   :type declaration-type
+   :global? global?
+   :identifier identifier
+   :initial-value initial-value})
+
+(defn- tacky-top-level->assembly [top-level ident->symbol]
+  (condp = (:declaration-type top-level)
+    :function (tacky-function->assembly-function top-level ident->symbol)
+    :static-variable (tacky-static-variable->assembly-static-variable top-level)
+    (exc/compiler-error "Invalid tacky type passed to compiler." top-level)))
+
+(defn- tacky-ast->assembly [{:keys [program ident->symbol]}]
+  (mapv #(tacky-top-level->assembly % ident->symbol) program))
 
 (defn generate-assembly [source]
   (-> source
@@ -426,13 +473,10 @@
 
   (generate-assembly
    "
-int foo(int a) {
-    return a + 1;
-}
+extern int x = 10;
 
 int main (void) {
-    int y = 5;
-    int x = foo(10);
+    int y = x + 100;
     return x;
 }
 

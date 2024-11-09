@@ -1,6 +1,5 @@
 (ns cljcc.log
-  (:require [clojure.string :as str]
-            [cljcc.log :as log]))
+  (:require [clojure.string :as str]))
 
 (def ^:private log-colors
   {:debug "\u001b[36m" ; Cyan
