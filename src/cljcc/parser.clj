@@ -2,7 +2,266 @@
   (:require
    [cljcc.lexer :as l]
    [cljcc.token :as t]
-   [cljcc.exception :as exc]))
+   [malli.core :as m]
+   [clojure.math :refer [pow]]
+   [malli.dev.pretty :as pretty]
+   [cljcc.exception :as exc]
+   [clojure.string :as str]))
+
+(declare Statement Exp Declaration Block Type)
+
+(def StorageClass [:enum :static :extern])
+
+(def IntType
+  [:map
+   [:type [:= :int]]])
+
+(def LongType
+  [:map
+   [:type [:= :long]]])
+
+(def FunType
+ [:map
+  [:type [:= :function]]
+  [:return-type [:ref #'Type]]
+  [:parameter-types [:vector [:ref #'Type]]]])
+
+(def Type
+  [:schema {:registry {::mtype-int #'IntType
+                       ::mtype-long #'LongType
+                       ::mtype-function #'FunType}}
+   [:multi {:dispatch :type}
+    [:int #'IntType]
+    [:long #'LongType]
+    [:function #'FunType]]])
+
+(def Const
+  [:map
+   [:type [:enum :int :long]]
+   [:value int?]])
+
+(def ConstantExp
+  [:map
+   [:type [:= :exp]]
+   [:exp-type [:= :constant-exp]]
+   [:value #'Const]])
+
+(def VariableExp
+  [:map
+   [:type [:= :exp]]
+   [:exp-type [:= :variable-exp]]
+   [:identifier string?]])
+
+(def CastExp
+  [:map
+   [:type [:= :exp]]
+   [:exp-type [:= :cast-exp]]
+   [:target-type #'Type]
+   [:value [:ref #'Exp]]])
+
+(def UnaryExp
+  [:map
+   [:type [:= :exp]]
+   [:exp-type [:= :unary-exp]]
+   [:unary-operator `[:enum ~@t/unary-ops]]
+   [:value [:ref #'Exp]]])
+
+(def BinaryExp
+  [:map
+   [:type [:= :exp]]
+   [:exp-type [:= :binary-exp]]
+   [:binary-operator `[:enum ~@(set (keys t/bin-ops))]]
+   [:left [:ref #'Exp]]
+   [:right [:ref #'Exp]]])
+
+(def AssignmentExp
+  [:map
+   [:type [:= :exp]]
+   [:exp-type [:= :assignment-exp]]
+   [:assignment-operator `[:enum ~@t/assignment-ops]]
+   [:left [:ref #'Exp]]
+   [:right [:ref #'Exp]]])
+
+(def ConditionalExp
+  [:map
+   [:type [:= :exp]]
+   [:exp-type [:= :conditional-exp]]
+   [:left [:ref #'Exp]]
+   [:middle [:ref #'Exp]]
+   [:right [:ref #'Exp]]])
+
+(def FunctionCallExp
+  [:map
+   [:type [:= :exp]]
+   [:exp-type [:= :function-call-exp]]
+   [:identifier string?]
+   [:arguments [:vector [:ref #'Exp]]]])
+
+(def Exp
+  [:schema {:registry {::mexp-constant #'ConstantExp
+                       ::mexp-variable #'VariableExp
+                       ::mexp-cast #'CastExp
+                       ::mexp-unary #'UnaryExp
+                       ::mexp-binary #'BinaryExp
+                       ::mexp-assignment #'AssignmentExp
+
+                       ::mexp-conditional #'ConditionalExp
+                       ::mexp-function-call #'FunctionCallExp}}
+   [:multi {:dispatch :exp-type}
+    [:constant-exp #'ConstantExp]
+    [:variable-exp #'VariableExp]
+    [:cast-exp #'CastExp]
+    [:unary-exp #'UnaryExp]
+    [:binary-exp #'BinaryExp]
+    [:assignment-exp #'AssignmentExp]
+    [:conditional-exp #'ConditionalExp]
+    [:function-call-exp #'FunctionCallExp]]])
+
+(def VarDeclaration
+  [:map
+   [:type [:= :declaration]]
+   [:declaration-type [:= :variable]]
+   [:variable-type #'Type]
+   [:storage-class [:maybe #'StorageClass]]
+   [:identifier string?]
+   [:initial [:maybe #'Exp]]])
+
+(def FunDeclaration
+  [:map
+   [:type [:= :declaration]]
+   [:declaration-type [:= :function]]
+   [:function-type #'FunType]
+   [:identifier string?]
+   [:storage-class [:maybe #'StorageClass]]
+   [:parameters [:vector string?]]
+   [:body [:maybe [:ref #'Block]]]])
+
+(def ReturnStatement
+  [:map
+   [:type [:= :statement]]
+   [:statement-type [:= :return]]
+   [:value #'Exp]])
+
+(def ExpressionStatement
+  [:map
+   [:type [:= :statement]]
+   [:statement-type [:= :expression]]
+   [:value #'Exp]])
+
+(def BreakStatement
+  [:map
+   [:type [:= :statement]]
+   [:statement-type [:= :break]]
+   [:label [:maybe string?]]])
+
+(def ContinueStatement
+  [:map
+   [:type [:= :statement]]
+   [:statement-type [:= :continue]]
+   [:label [:maybe string?]]])
+
+(def EmptyStatement
+  [:map
+   [:type [:= :statement]]
+   [:statement-type [:= :empty]]])
+
+(def WhileStatement
+  [:map
+   [:type [:= :statement]]
+   [:statement-type [:= :while]]
+   [:condition #'Exp]
+   [:body [:ref #'Statement]]])
+
+(def DoWhileStatement
+  [:map
+   [:type [:= :statement]]
+   [:statement-type [:= :do-while]]
+   [:condition #'Exp]
+   [:body [:ref #'Statement]]])
+
+(def ForStatement
+  [:map
+   [:type [:= :statement]]
+   [:statement-type [:= :for]]
+   [:init [:or
+           [:ref #'VarDeclaration]
+           [:maybe #'Exp]]]
+   [:post [:maybe #'Exp]]
+   [:condition [:maybe #'Exp]]
+   [:body [:ref #'Statement]]])
+
+(def IfStatement
+  [:map
+   [:type [:= :statement]]
+   [:statement-type [:= :if]]
+   [:condition #'Exp]
+   [:then-statement [:ref #'Statement]]
+   [:else-statement [:maybe [:ref #'Statement]]]])
+
+(def CompoundStatement
+  [:map
+   [:type [:= :statement]]
+   [:statement-type [:= :compound]]
+   [:block [:ref #'Block]]])
+
+(def Statement
+  [:schema {:registry {::mstatement-return #'ReturnStatement
+                       ::mstatement-expression #'ExpressionStatement
+                       ::mstatement-break #'BreakStatement
+                       ::mstatement-continue #'ContinueStatement
+                       ::mstatement-empty #'EmptyStatement
+                       ::mstatement-for #'ForStatement
+                       ::mstatement-while #'WhileStatement
+                       ::mstatement-do-while #'DoWhileStatement
+                       ::mstatement-compound #'CompoundStatement
+                       ::mstatement-if #'IfStatement}}
+    [:multi {:dispatch :statement-type}
+      [:return #'ReturnStatement]
+      [:expression #'ExpressionStatement]
+      [:break #'BreakStatement]
+      [:continue #'ContinueStatement]
+      [:empty #'EmptyStatement]
+      [:compound #'CompoundStatement]
+      [:while #'WhileStatement]
+      [:do-while #'DoWhileStatement]
+      [:if #'IfStatement]
+      [:for #'ForStatement]]])
+
+(def Declaration
+  [:schema {:registry {::mdeclaration-function #'FunDeclaration
+                       ::mdeclaration-variable #'VarDeclaration}}
+   [:multi {:dispatch :declaration-type}
+    [:function #'FunDeclaration]
+    [:variable #'VarDeclaration]]])
+
+(def BlockItem
+  [:schema {:registry {::mblockitem-statement #'Statement
+                       ::mblockitem-declaration #'Declaration}}
+   [:multi {:dispatch :type}
+    [:statement [:ref #'Statement]]
+    [:declaration [:ref #'Declaration]]]])
+
+(def Block
+  [:schema {:registry {::mblock-blockitem #'BlockItem}}
+   [:vector [:ref #'BlockItem]]])
+
+(def Program
+  [:schema {:registry {::mprogram-block #'Block}}
+   [:vector [:ref #'Declaration]]])
+
+(comment
+
+  (pretty/explain
+   Block
+   [{:type :statement
+     :statement-type :compound
+     :block [{:type :statement
+              :statement-type :return
+              :value {:type :exp
+                      :exp-type :variable-exp
+                      :identifier "asd"}}]}])
+
+  ())
 
 (declare parse parse-exp parse-statement parse-block expect parse-declaration parse-variable-declaration)
 
@@ -52,6 +311,12 @@
    :identifier identifier
    :arguments arguments})
 
+(defn cast-exp-node [target-type e]
+  {:type :exp
+   :exp-type :cast-exp
+   :target-type target-type
+   :value e})
+
 (defn unary-exp-node [op v]
   {:type :exp
    :exp-type :unary-exp
@@ -79,6 +344,34 @@
    :middle m
    :right r})
 
+(defn- parse-type [specifiers]
+  (condp = (mapv :specifier-type specifiers)
+    [:int] :int
+    [:long] :long
+    [:int :long] :long
+    [:long :int] :long
+    (exc/parser-error "Invalid specifiers" specifiers)))
+
+(defn specifier-node [{:keys [kind] :as token}]
+  (let [specifier-type (condp = kind
+                         :kw-int :int
+                         :kw-long :long
+                         :kw-static :static
+                         :kw-extern :extern
+                         (exc/parser-error "Parser Error. Invalid specifier." {:specifier-token token}))]
+    {:type :specifier
+     :specifier-type specifier-type}))
+
+(defn- parse-type-specifier [[{:keys [kind] :as token} & rst]]
+  (if-not (contains? #{:kw-int :kw-long} kind)
+    (exc/parser-error "Invalid token for type specifier" {:token token})
+    [(specifier-node token) rst]))
+
+(defn- parse-specifier [[{:keys [kind] :as token} & rst]]
+  (if-not (contains? #{:kw-int :kw-long :kw-static :kw-extern} kind)
+    (exc/parser-error "Invalid token for specifier" {:token token})
+    [(specifier-node token) rst]))
+
 (defn- parse-argument-list [tokens]
   (let [[e-node tokens] (parse-exp tokens)
         parse-comma-argument-f (fn [tokens]
@@ -89,15 +382,36 @@
         [_ tokens] (expect :right-paren tokens)]
     [(into [e-node] (vec rest-arguments)) tokens]))
 
+(defn- parse-const
+  "Expects a stringified number."
+  [v]
+  (let [long? (or (= \l (last v))
+                  (= \L (last v)))
+        n (if long?
+            (Long/parseLong (str/join (subvec (vec v) 0 (dec (count v)))))
+            (Long/parseLong v))
+        int-range? (and (not long?)
+                        (<= n (- (long (pow 2 31)) 1)))]
+    {:type (if int-range? :int :long)
+     :value n}))
+
 (defn- parse-factor [[{kind :kind :as token} :as tokens]]
   (cond
-    (= kind :number) [(constant-exp-node (:literal token)) (rest tokens)]
+    (= kind :number) [(constant-exp-node (parse-const (:literal token))) (rest tokens)]
     (t/unary-op? kind) (let [op kind
                              [e rst] (parse-factor (rest tokens))]
                          [(unary-exp-node op e) rst])
-    (= kind :left-paren) (let [[e rst] (parse-exp (rest tokens))
-                               [_ rst] (expect :right-paren rst)]
-                           [e rst])
+    (= kind :left-paren) (let [next-token-kind (:kind (first (rest tokens)))
+                               type-specifier? (contains? #{:kw-int :kw-long} next-token-kind)]
+                           (if type-specifier?
+                             (let [[specifiers tokens] (parse-repeatedly (rest tokens) parse-type-specifier :right-paren)
+                                   ptype (parse-type specifiers)
+                                   [_ tokens] (expect :right-paren tokens)
+                                   [f tokens] (parse-factor tokens)]
+                               [(cast-exp-node {:type ptype} f) tokens])
+                             (let [[e rst] (parse-exp (rest tokens))
+                                   [_ rst] (expect :right-paren rst)]
+                               [e rst])))
     (= kind :identifier) (if (= :left-paren (:kind (second tokens))) ; is a fn call
                            (let [[{f-name :literal} tokens] (expect :identifier tokens)
                                  [_ tokens] (expect :left-paren tokens)
@@ -249,7 +563,7 @@
     [(do-while-statement-node e s) tokens]))
 
 (defn- parse-for-init-statement [[{kind :kind} :as tokens]]
-  (if (contains? #{:kw-int :kw-static :kw-extern} kind)
+  (if (contains? #{:kw-int :kw-static :kw-long :kw-extern} kind)
     (parse-declaration tokens)
     (parse-optional-expression tokens parse-exp :semicolon)))
 
@@ -298,40 +612,32 @@
     (= kind :left-curly) (parse-compound-statement tokens)
     :else (parse-expression-statement tokens)))
 
-(defn parameter-node [token]
-  {:parameter-name (:literal token)
-   :identifier (:literal token)
-   :parameter-type (:kind token)})
-
-(defn specifier-node [{:keys [kind] :as token}]
-  (let [specifier-type (condp = kind
-                         :kw-int :int
-                         :kw-static :static
-                         :kw-extern :extern
-                         (throw (ex-info "Parser Error. Invalid specifier." {:specifier-token token})))]
-    {:type :specifier
-     :specifier-type specifier-type}))
+(defn parameter-node [{:keys [identifier ptype]}]
+  {:parameter-name identifier
+   :identifier identifier
+   :parameter-type ptype})
 
 (defn variable-declaration-node
-  ([identifier storage-class]
-   (variable-declaration-node identifier storage-class nil))
-  ([identifier storage-class v]
+  ([identifier storage-class vtype]
+   (variable-declaration-node identifier storage-class vtype nil))
+  ([identifier storage-class vtype init-exp]
    {:type :declaration
-    :storage-class storage-class
     :declaration-type :variable
+    :variable-type vtype
+    :storage-class storage-class
     :identifier identifier
-    :initial v}))
+    :initial init-exp}))
 
 (defn function-declaration-node
-  ([return-type storage-class identifier params]
-   (function-declaration-node return-type storage-class identifier params nil))
-  ([return-type storage-class identifier params body]
+  ([function-type storage-class identifier parameters]
+   (function-declaration-node function-type storage-class identifier parameters nil))
+  ([function-type storage-class identifier parameters body]
    {:type :declaration
-    :return-type return-type
-    :storage-class storage-class
     :declaration-type :function
+    :function-type function-type
+    :storage-class storage-class
     :identifier identifier
-    :parameters params
+    :parameters parameters
     :body body}))
 
 (defn- parse-param-list [tokens]
@@ -340,51 +646,57 @@
       (let [[_ tokens] (expect :kw-void tokens)
             [_ tokens] (expect :right-paren tokens)]
         [[] tokens]) ; void means no parameters
-      (let [[_ tokens] (expect :kw-int tokens)
+      (let [[specifiers tokens] (parse-repeatedly tokens parse-type-specifier :identifier)
+            first-parameter-type (parse-type specifiers)
             [ident-token tokens] (expect :identifier tokens)
             parse-comma-f (fn [tokens]
                             (let [[_ tokens] (expect :comma tokens)
-                                  [_ tokens] (expect :kw-int tokens)
+                                  [specifiers tokens] (parse-repeatedly tokens parse-type-specifier :identifier)
+                                  ptype (parse-type specifiers)
                                   [ident-token tokens] (expect :identifier tokens)]
-                              [ident-token tokens]))
+                              [{:identifier (:literal ident-token)
+                                :ptype ptype}
+                               tokens]))
             [rest-params tokens] (parse-repeatedly tokens parse-comma-f :right-paren)
             [_ tokens] (expect :right-paren tokens)
-            params (map parameter-node (into [ident-token] (vec rest-params)))]
+            params (mapv parameter-node (into [{:identifier (:literal ident-token)
+                                                :ptype first-parameter-type}]
+                                              (vec rest-params)))]
         [params tokens]))))
 
 (defn- parse-function-declaration [return-type storage-class tokens]
   (let [[{fn-name :literal} tokens] (expect :identifier tokens)
         [_ tokens] (expect :left-paren tokens)
-        [params tokens] (parse-param-list tokens)
+        [parameter-nodes tokens] (parse-param-list tokens)
+        parameters (mapv :identifier parameter-nodes)
+        parameter-types (mapv :parameter-type parameter-nodes)
+        function-type {:type :function
+                       :return-type {:type return-type}
+                       :parameter-types (mapv (fn [v] {:type v}) parameter-types)}
         semicolon? (= :semicolon (:kind (first tokens)))]
     (if semicolon?
       (let [[_ tokens] (expect :semicolon tokens)]
-        [(function-declaration-node return-type storage-class fn-name params) tokens])
+        [(function-declaration-node function-type storage-class fn-name parameters) tokens])
       (let [[body tokens] (parse-block tokens)]
-        [(function-declaration-node return-type storage-class fn-name params body) tokens]))))
+        [(function-declaration-node function-type storage-class fn-name parameters body) tokens]))))
 
-(defn- parse-variable-declaration [_variable-type storage-class tokens]
+(defn- parse-variable-declaration [variable-type storage-class tokens]
   (let [[ident-token tokens] (expect :identifier tokens)
-        [{kind :kind} :as tokens] tokens]
+        [{kind :kind} :as tokens] tokens
+        variable-type {:type variable-type}]
     (cond
       (= kind :semicolon) (let [[_ tokens] (expect :semicolon tokens)]
-                            [(variable-declaration-node (:literal ident-token) storage-class) tokens])
+                            [(variable-declaration-node (:literal ident-token) storage-class variable-type) tokens])
       (= kind :assignment) (let [[_ tokens] (expect :assignment tokens)
                                  [exp-node tokens] (parse-exp tokens)
                                  [_ tokens] (expect :semicolon tokens)]
-                             [(variable-declaration-node (:literal ident-token) storage-class exp-node) tokens])
+                             [(variable-declaration-node (:literal ident-token) storage-class variable-type exp-node) tokens])
       :else (throw (ex-info "Parser error. Not able  to parse variable declaration." {})))))
 
-(defn- parse-specifier [[{:keys [kind] :as token} & rst]]
-  (if-not (contains? #{:kw-int :kw-static :kw-extern} kind)
-    (exc/parser-error "Invalid token for specifier" {:token token})
-    [(specifier-node token) rst]))
-
 (defn- parse-type-and-storage-class [specifiers]
-  (let [{types true, storage-classes false} (group-by #(= :int (:specifier-type %)) specifiers)
-        type-specifier (if (not= 1 (count types))
-                         (exc/parser-error "Invalid type specifier." {:types types})
-                         (:specifier-type (first types)))
+  (let [valid-types #{:int :long}
+        {types true, storage-classes false} (group-by #(contains? valid-types (:specifier-type %)) specifiers)
+        type-specifier (parse-type types)
         storage-class (if (> (count storage-classes) 1)
                         (exc/parser-error "Invalid storage class." {:storage-classes storage-classes})
                         (:specifier-type (first storage-classes)))]
@@ -400,7 +712,7 @@
       (parse-variable-declaration type-specifier storage-class tokens))))
 
 (defn- parse-block-item [[token :as tokens]]
-  (if (contains? #{:kw-int :kw-static :kw-extern} (:kind token))
+  (if (contains? #{:kw-int :kw-static :kw-extern :kw-long} (:kind token))
     (parse-declaration tokens)
     (parse-statement tokens)))
 
@@ -427,17 +739,61 @@
 
 (comment
 
+  (m/validate
+   Program)
+
+  (m/coerce
+   Program
+   (parse-from-src
+    "int main(void) {
+return (long) 42;
+}"))
+
+
+  (pretty/explain
+   Program
+   (parse-from-src
+    "
+long add(int a, int b) {
+    return (long) a + (long) b;
+}
+
+int main(void) {
+    long a = add(2147483645, 2147483645);
+    if (a == 4294967290l) {
+        return 1;
+    }
+    return 0;
+}
+"))
+
+  (pretty/explain
+   Program
+   (parse-from-src
+    "int main(void) {
+    long l = 9223372036854775807l;
+    return (l - 2l == 9223372036854775805l);
+}
+"))
+   
+
   (parse-from-src "
 int main(void) {
 
     int x = 0;
 
-    for (static int i = 0; i < 10; i = i + 1) {
+    for (int i = 0; i < 10; i = i + 1) {
         x = x + 1;
     }
 
     return x;
 }
+
+int foo(int x) {
+x += 1;
+return x;
+}
+
 ")
 
   ())

@@ -52,6 +52,7 @@
     ;; keywords
     :kw-return
     :kw-int
+    :kw-long
     :kw-void})
 
 (def unary-ops
@@ -176,6 +177,7 @@
     "return" :kw-return
     "void" :kw-void
     "int" :kw-int
+    "long" :kw-long
     "if" :kw-if
     "else" :kw-else
     "do" :kw-do

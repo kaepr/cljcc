@@ -43,7 +43,7 @@
                              (-> ctx
                                  (update :col inc)))
      (digit? ch) (let [[chrs rst] (split-with letter-digit? source)
-                       number (read-number (apply str chrs))
+                       number (read-number (apply str chrs) line col)
                        cnt (count chrs)
                        npos (+ pos cnt)
                        token (t/create :number line col number)]
@@ -67,14 +67,11 @@
 
 (comment
 
-  (lex "int main(void) {return int a = 2; a <<= 2;}")
-
-
-  (lex "
- extern int a;
-
- int main(void) {
-                 return 42};")
-
+  (lex
+   "
+int main() {
+    long a = 110;
+}
+")
 
  ())

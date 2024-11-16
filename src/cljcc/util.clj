@@ -1,7 +1,8 @@
 (ns cljcc.util
   (:require [clojure.java.shell :refer [sh]]
-            [clojure.string :as s]
-            [cljcc.log :as log]))
+            [clojure.string :as str]
+            [cljcc.log :as log]
+            [cljcc.exception :as exc]))
 
 (def ^:private counter "Global integer counter for generating unique identifier names." (atom 0))
 
@@ -17,8 +18,8 @@
          _ (swap! counter inc)]
      (-> identifier
          (str "." n)
-         (s/replace #":" "")
-         (s/replace #"-" "_")))))
+         (str/replace #":" "")
+         (str/replace #"-" "_")))))
 
 (defn reset-counter! []
   (reset! counter 0))
@@ -73,8 +74,31 @@
 (defn whitespace? [^Character ch]
   (Character/isWhitespace ch))
 
-(defn read-number [str]
+(defn- valid-long?
+  "Validates string to be of form [0-9]+[lL]\b.
+
+  Verifies that `l` or `L` occurs only once, and at the end."
+  [s]
   (try
-    (Integer/parseInt str)
-    (catch Exception e
-      (throw (ex-info "Lexer error. Malformed number." {:message (.getMessage e)})))))
+    (let [strip-l-or-L (if-let [_ (or (str/ends-with? s "l")
+                                      (str/ends-with? s "L"))]
+                         (subs s 0 (dec (count s)))
+                         s)
+          _ (-> strip-l-or-L
+                Long/parseLong
+                Long/toString)]
+        s)
+    (catch Exception _e
+      false)))
+
+(defn read-number
+  "Returns number and number type tuple.
+
+  Checks whether number is valid long. If no, checks if it valid int.
+  Otherwise error."
+  [s line col]
+  (if-let [s (valid-long? s)]
+    s
+    (exc/lex-error {:line line
+                    :col col})))
+
