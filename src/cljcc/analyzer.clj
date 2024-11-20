@@ -48,6 +48,8 @@
     :conditional-exp (p/conditional-exp-node (resolve-exp (:left e) ident->symbol)
                                              (resolve-exp (:middle e) ident->symbol)
                                              (resolve-exp (:right e) ident->symbol))
+    :cast-exp (p/cast-exp-node (:target-type e)
+                               (resolve-exp (:value e)))
     :function-call-exp (let [fn-name (:identifier e)
                              args (:arguments e)]
                          (if (contains? ident->symbol fn-name)

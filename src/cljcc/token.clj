@@ -126,6 +126,20 @@
 (defn binary-op? [op]
   (contains? bin-ops op))
 
+(defn logical? [v]
+  (contains? #{:logical-and
+               :logical-not
+               :logical-or} v))
+
+(defn arithmetic? [v]
+  (contains?
+   #{:multiply
+     :divide
+     :remainder
+     :plus
+     :hyphen}
+   v))
+
 (defn precedence [op]
   (op bin-ops))
 

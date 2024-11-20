@@ -44,27 +44,31 @@
   [:map
    [:type [:= :exp]]
    [:exp-type [:= :constant-exp]]
-   [:value #'Const]])
+   [:value #'Const]
+   [:value-type {:optional true} #'Type]])
 
 (def VariableExp
   [:map
    [:type [:= :exp]]
    [:exp-type [:= :variable-exp]]
-   [:identifier string?]])
+   [:identifier string?]
+   [:value-type {:optional true} #'Type]])
 
 (def CastExp
   [:map
    [:type [:= :exp]]
    [:exp-type [:= :cast-exp]]
    [:target-type #'Type]
-   [:value [:ref #'Exp]]])
+   [:value [:ref #'Exp]]
+   [:value-type {:optional true} #'Type]])
 
 (def UnaryExp
   [:map
    [:type [:= :exp]]
    [:exp-type [:= :unary-exp]]
    [:unary-operator `[:enum ~@t/unary-ops]]
-   [:value [:ref #'Exp]]])
+   [:value [:ref #'Exp]]
+   [:value-type {:optional true} #'Type]])
 
 (def BinaryExp
   [:map
@@ -72,7 +76,8 @@
    [:exp-type [:= :binary-exp]]
    [:binary-operator `[:enum ~@(set (keys t/bin-ops))]]
    [:left [:ref #'Exp]]
-   [:right [:ref #'Exp]]])
+   [:right [:ref #'Exp]]
+   [:value-type {:optional true} #'Type]])
 
 (def AssignmentExp
   [:map
@@ -80,7 +85,8 @@
    [:exp-type [:= :assignment-exp]]
    [:assignment-operator `[:enum ~@t/assignment-ops]]
    [:left [:ref #'Exp]]
-   [:right [:ref #'Exp]]])
+   [:right [:ref #'Exp]]
+   [:value-type {:optional true} #'Type]])
 
 (def ConditionalExp
   [:map
@@ -88,14 +94,16 @@
    [:exp-type [:= :conditional-exp]]
    [:left [:ref #'Exp]]
    [:middle [:ref #'Exp]]
-   [:right [:ref #'Exp]]])
+   [:right [:ref #'Exp]]
+   [:value-type {:optional true} #'Type]])
 
 (def FunctionCallExp
   [:map
    [:type [:= :exp]]
    [:exp-type [:= :function-call-exp]]
    [:identifier string?]
-   [:arguments [:vector [:ref #'Exp]]]])
+   [:arguments [:vector [:ref #'Exp]]]
+   [:value-type {:optional true} #'Type]])
 
 (def Exp
   [:schema {:registry {::mexp-constant #'ConstantExp
@@ -170,6 +178,7 @@
    [:type [:= :statement]]
    [:statement-type [:= :while]]
    [:condition #'Exp]
+   [:label {:optional true} string?]
    [:body [:ref #'Statement]]])
 
 (def DoWhileStatement
@@ -177,6 +186,7 @@
    [:type [:= :statement]]
    [:statement-type [:= :do-while]]
    [:condition #'Exp]
+   [:label {:optional true} string?]
    [:body [:ref #'Statement]]])
 
 (def ForStatement
@@ -188,6 +198,7 @@
            [:maybe #'Exp]]]
    [:post [:maybe #'Exp]]
    [:condition [:maybe #'Exp]]
+   [:label {:optional true} string?]
    [:body [:ref #'Statement]]])
 
 (def IfStatement
@@ -740,60 +751,10 @@
 (comment
 
   (m/validate
-   Program)
-
-  (m/coerce
    Program
    (parse-from-src
     "int main(void) {
 return (long) 42;
 }"))
-
-
-  (pretty/explain
-   Program
-   (parse-from-src
-    "
-long add(int a, int b) {
-    return (long) a + (long) b;
-}
-
-int main(void) {
-    long a = add(2147483645, 2147483645);
-    if (a == 4294967290l) {
-        return 1;
-    }
-    return 0;
-}
-"))
-
-  (pretty/explain
-   Program
-   (parse-from-src
-    "int main(void) {
-    long l = 9223372036854775807l;
-    return (l - 2l == 9223372036854775805l);
-}
-"))
-   
-
-  (parse-from-src "
-int main(void) {
-
-    int x = 0;
-
-    for (int i = 0; i < 10; i = i + 1) {
-        x = x + 1;
-    }
-
-    return x;
-}
-
-int foo(int x) {
-x += 1;
-return x;
-}
-
-")
 
   ())
