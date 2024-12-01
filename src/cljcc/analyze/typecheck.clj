@@ -532,9 +532,13 @@
 
   A program is a list of declarations."
   [program]
-  (let [v (typecheck-program program)]
-    {:program (:program v)
-     :ident->symbol (dissoc (:ident->symbol v) :at-top-level)}))
+  (let [v (typecheck-program program)
+        program (:program v)
+        m (dissoc (:ident->symbol v) :at-top-level)
+        _ (m/coerce p/Program program)
+        _ (m/coerce SymbolMap m)]
+    {:program program
+     :ident->symbol m}))
 
 (comment
 

@@ -3,8 +3,7 @@
    [cljcc.lexer :as l]
    [cljcc.util :as u]
    [cljcc.parser :as p]
-   [cljcc.analyzer :as a]))
-   
+   [cljcc.analyze.core :as a]))
 
 (defn- variable
   ([]

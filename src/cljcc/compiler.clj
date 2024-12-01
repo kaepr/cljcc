@@ -2,7 +2,7 @@
   (:require [cljcc.parser :as p]
             [cljcc.tacky :as t]
             [cljcc.lexer :as l]
-            [cljcc.analyzer :as a]
+            [cljcc.analyze.core :as a]
             [cljcc.exception :as exc]))
 
 (def registers #{:ax :dx :di :si :r8 :r9 :r10 :r11 :cx :cl})
@@ -305,10 +305,10 @@
                                (let [operand (get-in inst [path])
                                      operand-type (:operand-type operand)
                                      identifier (:identifier operand)]
-                                (and
-                                 (= :pseudo operand-type)
-                                 (contains? ident->symbol identifier)
-                                 (= :static (get-in ident->symbol [identifier :attrs :type])))))
+                                 (and
+                                  (= :pseudo operand-type)
+                                  (contains? ident->symbol identifier)
+                                  (= :static (get-in ident->symbol [identifier :attrs :type])))))
         replace-pseudo-with-data-op (fn [inst path]
                                       (if (pseudo-data-operand? inst path)
                                         (assoc inst path (data-operand (get-in inst [path :identifier])))
@@ -403,9 +403,9 @@
   [{instructions :instructions max-stack-val :max-stack-val}]
   (let [v (abs max-stack-val)
         v (cond
-              (= (mod v 16) 0) v
-              (< v 0) (- v (- 16 (mod v 16)))
-              :else (+ v (- 16 (mod v 16))))]
+            (= (mod v 16) 0) v
+            (< v 0) (- v (- 16 (mod v 16)))
+            :else (+ v (- 16 (mod v 16))))]
     (cons (allocate-stack-instruction v) instructions)))
 
 (defn- parameters->assembly-instructions
@@ -418,8 +418,8 @@
         [register-params stack-params] (split-at 6 parameters)
         reg-args-to-pseudo-instructions (mapv (fn [reg param]
                                                 [(mov-instruction (reg-operand reg) (pseudo-operand (:identifier param)))])
-                                             registers
-                                             register-params)
+                                              registers
+                                              register-params)
         stack-args-to-pseudo-instruction (into [] (map-indexed (fn [idx param]
                                                                  [(mov-instruction (stack-operand (+ 16 (* 8 idx))) (pseudo-operand (:identifier param)))]) stack-params))]
     (->> [reg-args-to-pseudo-instructions stack-args-to-pseudo-instruction]
