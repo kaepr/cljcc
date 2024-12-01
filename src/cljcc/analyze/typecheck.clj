@@ -3,9 +3,11 @@
             [malli.dev.pretty :as pretty]
             [cljcc.parser :as p]
             [cljcc.token :as t]
+            [cljcc.analyze.resolve :as r]
+            [cljcc.analyze.label-loops :as l]
             [cljcc.exception :as exc]))
 
-(declare typecheck-block typecheck-declaration)
+(declare typecheck-block typecheck-declaration to-static-init)
 
 (def FunAttribute
   [:map
@@ -17,10 +19,40 @@
   [:map
    [:type [:= :local]]])
 
+(def NoInitializer
+  [:map
+   [:type [:= :no-initializer]]])
+
+(def Tentative
+  [:map
+   [:type [:= :tentative]]])
+
+(def IntInit
+  [:map
+   [:type [:= :int-init]]
+   [:value int?]])
+
+(def LongInit
+  [:map
+   [:type [:= :long-init]]
+   [:value int?]])
+
+(def Initial
+  [:map
+   [:type [:= :initial]]
+   [:static-init [:or IntInit LongInit]]])
+
+(def InitialValue
+  [:or
+   NoInitializer
+   Tentative
+   Initial])
+
 (def StaticAttribute
   [:map
    [:type [:= :static]]
-   [:global? boolean?]])
+   [:global? boolean?]
+   [:initial-value #'InitialValue]])
 
 (def Attribute
   [:multi {:dispatch :type}
@@ -33,6 +65,26 @@
    [:type #'p/Type]
    [:attribute #'Attribute]])
 
+(def SymbolMap
+  [:map-of string? #'Symbol])
+
+(def TypecheckedOut
+  [:map
+   [:ident->symbol #'SymbolMap]
+   [:program p/Program]])
+
+(defn- create-symbol [type attribute]
+  {:type type
+   :attribute attribute})
+
+(defn- local-attribute []
+  {:type :local})
+
+(defn- static-attribute [initial-value global?]
+  {:type :static
+   :initial-value initial-value
+   :global? global?})
+
 (defn- set-type
   "Assocs onto an expression given type."
   [e t] (assoc e :value-type t))
@@ -41,6 +93,24 @@
 
 (defn- symbol-function? [s]
   (= :function (:type (:type s))))
+
+(defn- no-initializer-iv []
+  {:type :no-initializer})
+
+(defn- tentative-iv []
+  {:type :tentative})
+
+(defn- initial-iv [static-init]
+  {:type :initial
+   :static-init static-init})
+
+(defn- int-init [v]
+  {:type :int-init
+   :value v})
+
+(defn- long-init [v]
+  {:type :long-init
+   :value v})
 
 (defmulti typecheck-exp
   "Returns the expression, after typechecking nested expressions."
@@ -90,20 +160,20 @@
   (let
    [typed-left-e (typecheck-exp left ident->symbol)
     typed-right-e (typecheck-exp right ident->symbol)]
-   (if (t/logical? binary-operator)
-     (set-type (p/binary-exp-node typed-left-e
-                                  typed-right-e
-                                  binary-operator)
-               {:type :int})
-     (let [tl (get-type typed-left-e)
-           tr (get-type typed-right-e)
-           common-type (get-common-type tl tr)
-           convert-left-exp (convert-to-exp typed-left-e common-type)
-           convert-right-exp (convert-to-exp typed-right-e common-type)
-           typed-binary-exp (p/binary-exp-node convert-left-exp convert-right-exp binary-operator)]
-       (if (t/arithmetic? binary-operator)
-         (set-type typed-binary-exp common-type)
-         (set-type typed-binary-exp {:type :int}))))))
+    (if (t/logical? binary-operator)
+      (set-type (p/binary-exp-node typed-left-e
+                                   typed-right-e
+                                   binary-operator)
+                {:type :int})
+      (let [tl (get-type typed-left-e)
+            tr (get-type typed-right-e)
+            common-type (get-common-type tl tr)
+            convert-left-exp (convert-to-exp typed-left-e common-type)
+            convert-right-exp (convert-to-exp typed-right-e common-type)
+            typed-binary-exp (p/binary-exp-node convert-left-exp convert-right-exp binary-operator)]
+        (if (t/arithmetic? binary-operator)
+          (set-type typed-binary-exp common-type)
+          (set-type typed-binary-exp {:type :int}))))))
 
 (defmethod typecheck-exp :assignment-exp
   [{:keys [left right assignment-operator] :as e} ident->symbol]
@@ -113,27 +183,38 @@
     left-type (get-type typed-left)
     converted-right (convert-to-exp typed-right left-type)
     typed-assign-exp (p/assignment-exp-node typed-left converted-right assignment-operator)]
-   (set-type typed-assign-exp left-type)))
+    (set-type typed-assign-exp left-type)))
+
+(defmethod typecheck-exp :conditional-exp
+  [{:keys [left right middle] :as _e} m]
+  (let [t-left (typecheck-exp left m)
+        t-right (typecheck-exp right m)
+        t-middle (typecheck-exp middle m)
+        common-type (get-common-type (get-type t-middle) (get-type t-right))
+        convert-right (convert-to-exp t-right common-type)
+        convert-middle (convert-to-exp t-middle common-type)
+        typed-cond-e (p/conditional-exp-node t-left t-middle t-right)]
+    (set-type typed-cond-e common-type)))
 
 (defmethod typecheck-exp :function-call-exp
   [{:keys [identifier arguments] :as e} ident->symbol]
   (let
    [{ftype :type :as symbol} (get ident->symbol identifier)]
-   (if (symbol-function? symbol)
-     (let [_ (when (not= (count arguments) (count (:parameter-types ftype)))
-               (exc/analyzer-error "Function called with wrong number of arguments."
-                                   {:expected (count (:parameter-types ftype))
-                                    :actual (count arguments)}))
-           cast-arg-to-param-type-f (fn [param-type arg]
-                                      (convert-to-exp (typecheck-exp arg ident->symbol)
-                                                      param-type))
-           converted-args (mapv cast-arg-to-param-type-f
-                                (:parameter-types ftype)
-                                arguments)
-           typed-fun-call-exp (p/function-call-exp-node identifier converted-args)]
-       (set-type typed-fun-call-exp (:return-type ftype)))
-     (exc/analyzer-error "Variable used as function name" {:symbol symbol
-                                                           :expression e}))))
+    (if (symbol-function? symbol)
+      (let [_ (when (not= (count arguments) (count (:parameter-types ftype)))
+                (exc/analyzer-error "Function called with wrong number of arguments."
+                                    {:expected (count (:parameter-types ftype))
+                                     :actual (count arguments)}))
+            cast-arg-to-param-type-f (fn [param-type arg]
+                                       (convert-to-exp (typecheck-exp arg ident->symbol)
+                                                       param-type))
+            converted-args (mapv cast-arg-to-param-type-f
+                                 (:parameter-types ftype)
+                                 arguments)
+            typed-fun-call-exp (p/function-call-exp-node identifier converted-args)]
+        (set-type typed-fun-call-exp (:return-type ftype)))
+      (exc/analyzer-error "Variable used as function name" {:symbol symbol
+                                                            :expression e}))))
 
 (defmulti typecheck-statement
   "Dispatches based on type of statement.
@@ -210,7 +291,20 @@
      :ident->symbol (:ident->symbol typed-body-statement)}))
 
 (defmethod typecheck-statement :if
-  [return-type {:keys [condition then-statement else-statement]} m])
+  [return-type {:keys [condition then-statement else-statement]} m]
+  (if else-statement
+    (let [t-condition (typecheck-exp condition m)
+          {t-then :statement
+           m :ident->symbol} (typecheck-statement return-type then-statement m)
+          {t-else :statement
+           m :ident->symbol} (typecheck-statement return-type then-statement m)]
+      {:statement (p/if-statement-node t-condition t-then t-else)
+       :ident->symbol m})
+    (let [t-condition (typecheck-exp condition m)
+          {t-then :statement
+           m :ident->symbol} (typecheck-statement return-type then-statement m)]
+      {:statement (p/if-statement-node t-condition t-then)
+       :ident->symbol m})))
 
 (defmethod typecheck-statement :compound
   [return-type {:keys [block]} m]
@@ -218,19 +312,254 @@
     {:statement (p/compound-statement-node typed-block)
      :ident->symbol (:ident->symbol typed-block)}))
 
-(defn- typecheck-block [return-type block ident->symbol])
+(defn- typecheck-item [return-type {:keys [type] :as item} m]
+  (condp = type
+    :declaration (let [v (typecheck-declaration item m)]
+                   {:block-item (:declaration v)
+                    :ident->symbol (:ident->symbol v)})
+    :statement (let [v (typecheck-statement return-type item m)]
+                 {:block-item (:statement v)
+                  :ident->symbol (:ident->symbol v)})
+    (exc/analyzer-error "Invalid statement/declaration." item)))
 
-(defn- typecheck-declaration [])
+(defn- typecheck-block [return-type block ident->symbol]
+  (reduce (fn [acc item]
+            (let [v (typecheck-item return-type item (:ident->symbol acc))]
+              {:block (conj (:block acc) (:block-item v))
+               :ident->symbol (:ident->symbol v)}))
+          {:block []
+           :ident->symbol ident->symbol}
+          block))
+
+(defn- get-initial-value
+  [{:keys [initial storage-class variable-type] :as declaration}]
+  (let [constant-exp? (= :constant-exp (:exp-type initial))]
+    (cond
+      constant-exp? (to-static-init initial variable-type)
+      (nil? initial) (if (= :extern storage-class)
+                       (no-initializer-iv)
+                       (tentative-iv))
+      :else (exc/analyzer-error "Non-constant initializer." declaration))))
+
+(defn- const-convert [{ttype :type :as _target-type} {const-type :type value :value :as const}]
+  (cond
+    (and (= ttype :int) (= const-type :long)) {:type :int
+                                               :value (-> value
+                                                          long
+                                                          unchecked-int)}
+    (and (= ttype :long) (= const-type :int)) {:type :long
+                                               :value (long value)}
+    :else const))
+
+(defn- to-static-init [{:keys [value exp-type] :as e} var-type]
+  (cond
+    (= :constant-exp exp-type) (let [c-const (const-convert var-type value)]
+                                 (cond
+                                   (= :int (:type c-const)) (initial-iv (int-init (:value c-const)))
+                                   (= :long (:type c-const)) (initial-iv (long-init (:value c-const)))))
+    (nil? e) (initial-iv (int-init 0))
+    :else (exc/analyzer-error "Non-constant initializer on static variable." e)))
+
+(defn- validate-file-scope-variable-declaration
+  [{:keys [variable-type storage-class] :as cur-decl} prev-symbol]
+  (let [_ (when (not= variable-type (:type prev-symbol))
+            (exc/analyzer-error "Redeclared with different types." {:declaration1 cur-decl
+                                                                    :declaration2 prev-symbol}))
+        global? (not= :static storage-class)
+        global? (cond
+                  (= :extern storage-class) (get-in prev-symbol [:attribute :global?])
+                  (not= global? (get-in prev-symbol [:attribute :global?])) (exc/analyzer-error "Conflicting variable linkage." {:d1 cur-decl
+                                                                                                                                 :d2 prev-symbol})
+                  :else global?)
+        initial-value (get-initial-value cur-decl)
+        initial-value (cond
+                        (=
+                         :initial
+                         (get-in prev-symbol [:attribute :initial-value :type])) (if (= (:type initial-value) :initial)
+                                                                                   (exc/analyzer-error "Conflicting file scope variable definition." {:d1 cur-decl
+                                                                                                                                                      :d2 prev-symbol})
+                                                                                   (get-in prev-symbol [:attribute :initial-value]))
+                        (and
+                         (= :tentative (get-in prev-symbol [:attribute :initial-value :type]))
+                         (not= :initial (:type initial-value))) {:type :tentative}
+                        :else initial-value)]
+    {:global? global?
+     :initial-value initial-value}))
+
+(defn- typecheck-file-scope-variable-declaration
+  [{:keys [identifier storage-class variable-type] :as d} ident->symbol]
+  (let [prev-symbol (get ident->symbol identifier)
+        global? (not= :static storage-class)
+        initial-value (get-initial-value d)
+        {global? :global?
+         initial-value :initial-value} (if prev-symbol
+                                         (validate-file-scope-variable-declaration d prev-symbol)
+                                         {:global? global?
+                                          :initial-value initial-value})]
+    {:declaration d
+     :ident->symbol (assoc ident->symbol
+                           identifier
+                           (create-symbol variable-type (static-attribute initial-value global?)))}))
+
+(defn- typecheck-local-scope-variable-declaration
+  [{:keys [identifier variable-type storage-class initial] :as d} ident->symbol]
+  (condp = storage-class
+    :extern (let [_ (when (not (nil? initial))
+                      (exc/analyzer-error "Initializer on local extern variable declaration." d))
+                  prev-symbol (get ident->symbol identifier)
+                  prev-type (:type prev-symbol)
+                  _ (when (and prev-symbol (not= prev-type variable-type))
+                      (exc/analyzer-error "Redeclared with different types." {:declaration1 d
+                                                                              :declaration2 prev-symbol}))
+                  symbols (if prev-symbol
+                            ident->symbol
+                            (assoc ident->symbol
+                                   identifier
+                                   (create-symbol variable-type (static-attribute (no-initializer-iv) true))))]
+              {:declaration d
+               :ident->symbol symbols})
+    :static (let [initial-value (to-static-init initial variable-type)
+                  updated-symbols (assoc ident->symbol
+                                         identifier
+                                         (create-symbol variable-type (static-attribute initial-value false)))]
+              {:declaration d
+               :ident->symbol updated-symbols})
+    (let [updated-symbols (assoc ident->symbol
+                                 identifier
+                                 (create-symbol
+                                  variable-type
+                                  (local-attribute)))
+          casted-e (if (nil? initial)
+                     initial
+                     (convert-to-exp initial variable-type))
+          t-e (typecheck-optional-expression casted-e updated-symbols)]
+      {:declaration (assoc d :initial t-e)
+       :ident->symbol updated-symbols})))
+
+(defn- fun-attribute [defined? global?]
+  {:type :fun
+   :defined? defined?
+   :global? global?})
+
+(defn- validate-old-fn-decl-return-attribute
+  [cur-decl prev-symbol]
+  (let [prev-function? (= :function (get-in prev-symbol [:type :type]))
+        _ (when-not prev-function?
+            (exc/analyzer-error "Variable being redeclared as function." {:declaration cur-decl
+                                                                          :prev-symbol prev-symbol}))
+        same-type? (and (= (get-in cur-decl [:function-type :parameter-types])
+                           (get-in prev-symbol [:type :parameter-types]))
+                        (= (get-in cur-decl [:function-type :return-type])
+                           (get-in prev-symbol [:type :return-type])))
+        _ (when-not same-type?
+            (exc/analyzer-error "Incompatible function type declarations." {:declaration cur-decl
+                                                                            :prev-declaration-type prev-symbol}))
+        defined? (seq (:body cur-decl))
+        prev-defined? (get-in prev-symbol [:attribute :defined?])
+        _ (when (and defined? prev-defined?)
+            (exc/analyzer-error "Function defined more than once." {:declaration cur-decl}))
+        current-static? (= :static (:storage-class cur-decl))
+        old-global? (get-in prev-symbol [:attribute :global?])
+        _ (when (and old-global? current-static?)
+            (exc/analyzer-error "Static function definition follows non static." {:declaration cur-decl}))]
+    {:defined? prev-defined?
+     :global? old-global?}))
+
+(defn- add-parameter-to-symbols
+  [parameters function-type ident->symbol]
+  (if (zero? (count parameters))
+    ident->symbol
+    (apply assoc
+           ident->symbol
+           (flatten
+            (map (fn [p t]
+                   [p (create-symbol t (local-attribute))])
+                 parameters
+                 (:parameter-types function-type))))))
+
+(defn- typecheck-function-declaration
+  [{:keys [identifier storage-class body parameters function-type] :as d} ident->symbol]
+  (let [body? (seq body)
+        prev-symbol (get ident->symbol identifier)
+        {defined? :defined?
+         global? :global?} (if prev-symbol
+                             (validate-old-fn-decl-return-attribute d prev-symbol)
+                             {:defined? false
+                              :global? (not= :static storage-class)})
+        function-attribute (fun-attribute (boolean (or defined? body?)) global?)
+        updated-symbols (assoc ident->symbol
+                               identifier
+                               (create-symbol
+                                function-type
+                                function-attribute))]
+    (if body?
+      (let [with-parameter-symbols (add-parameter-to-symbols
+                                    parameters
+                                    function-type
+                                    updated-symbols)
+            with-body-symbols (typecheck-block (:return-type function-type)
+                                               body
+                                               (assoc with-parameter-symbols
+                                                      :at-top-level false))]
+        {:declaration d
+         :ident->symbol (assoc (:ident->symbol with-body-symbols)
+                               :at-top-level true)})
+      {:declaration d
+       :ident->symbol updated-symbols})))
+
+(defn- typecheck-declaration
+  [{:keys [declaration-type] :as d} ident->symbol]
+  (let [at-top-level? (:at-top-level ident->symbol)]
+    (condp = declaration-type
+      :variable (if at-top-level?
+                  (typecheck-file-scope-variable-declaration d ident->symbol)
+                  (typecheck-local-scope-variable-declaration d ident->symbol))
+      :function (typecheck-function-declaration d ident->symbol)
+      (exc/analyzer-error "Invalid declaration for typechecker." {:declaration d}))))
 
 (defn- typecheck-program [program]
-  ())
+  (let [rf (fn [acc decl]
+             (let [d (typecheck-declaration decl (:ident->symbol acc))]
+               {:program (conj (:program acc) (:declaration d))
+                :ident->symbol (:ident->symbol d)}))]
+    (reduce rf
+            {:program []
+             :ident->symbol {:at-top-level true}}
+            program)))
 
 (defn typecheck
   "Typechecks given program.
 
-  Program := [Block]"
-  [program])
+  A program is a list of declarations."
+  [program]
+  (let [v (typecheck-program program)]
+    {:program (:program v)
+     :ident->symbol (dissoc (:ident->symbol v) :at-top-level)}))
 
 (comment
+
+  (def file-path "./test-programs/example.c")
+
+  (slurp "./test-programs/example.c")
+
+  (-> file-path
+      slurp
+      p/parse-from-src)
+
+  (-> file-path
+      slurp
+      p/parse-from-src
+      r/resolve-program
+      l/label-loops
+      typecheck)
+
+  (pretty/explain
+   #'TypecheckedOut
+   (-> file-path
+       slurp
+       p/parse-from-src
+       r/resolve-program
+       l/label-loops
+       typecheck))
 
   ())

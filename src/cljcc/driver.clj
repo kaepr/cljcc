@@ -5,7 +5,7 @@
    [cljcc.tacky :as t]
    [cljcc.lexer :as l]
    [cljcc.emit :as e]
-   [cljcc.analyzer :as a]
+   [cljcc.analyze.core :as a]
    [clojure.pprint :as pp]
    [cljcc.log :as log]
    [cljcc.util :refer [get-os handle-sh mac-aarch64? make-file-name]]
