@@ -3,75 +3,12 @@
             [malli.dev.pretty :as pretty]
             [cljcc.parser :as p]
             [cljcc.token :as t]
+            [cljcc.schema :as s]
             [cljcc.analyze.resolve :as r]
             [cljcc.analyze.label-loops :as l]
             [cljcc.exception :as exc]))
 
 (declare typecheck-block typecheck-declaration to-static-init)
-
-(def FunAttribute
-  [:map
-   [:type [:= :fun]]
-   [:defined? boolean?]
-   [:global? boolean?]])
-
-(def LocalAttribute
-  [:map
-   [:type [:= :local]]])
-
-(def NoInitializer
-  [:map
-   [:type [:= :no-initializer]]])
-
-(def Tentative
-  [:map
-   [:type [:= :tentative]]])
-
-(def IntInit
-  [:map
-   [:type [:= :int-init]]
-   [:value int?]])
-
-(def LongInit
-  [:map
-   [:type [:= :long-init]]
-   [:value int?]])
-
-(def Initial
-  [:map
-   [:type [:= :initial]]
-   [:static-init [:or IntInit LongInit]]])
-
-(def InitialValue
-  [:or
-   NoInitializer
-   Tentative
-   Initial])
-
-(def StaticAttribute
-  [:map
-   [:type [:= :static]]
-   [:global? boolean?]
-   [:initial-value #'InitialValue]])
-
-(def Attribute
-  [:multi {:dispatch :type}
-   [:fun #'FunAttribute]
-   [:static #'StaticAttribute]
-   [:local #'LocalAttribute]])
-
-(def Symbol
-  [:map
-   [:type #'p/Type]
-   [:attribute #'Attribute]])
-
-(def SymbolMap
-  [:map-of string? #'Symbol])
-
-(def TypecheckedOut
-  [:map
-   [:ident->symbol #'SymbolMap]
-   [:program p/Program]])
 
 (defn- create-symbol [type attribute]
   {:type type
@@ -535,8 +472,8 @@
   (let [v (typecheck-program program)
         program (:program v)
         m (dissoc (:ident->symbol v) :at-top-level)
-        _ (m/coerce p/Program program)
-        _ (m/coerce SymbolMap m)]
+        _ (m/coerce s/Program program)
+        _ (m/coerce s/SymbolMap m)]
     {:program program
      :ident->symbol m}))
 
@@ -558,7 +495,7 @@
       typecheck)
 
   (pretty/explain
-   #'TypecheckedOut
+   s/TypecheckedOut
    (-> file-path
        slurp
        p/parse-from-src

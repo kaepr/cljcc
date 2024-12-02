@@ -2,6 +2,7 @@
   (:require [cljcc.exception :as exc]
             [cljcc.parser :as p]
             [malli.dev.pretty :as pretty]
+            [cljcc.schema :as s]
             [cljcc.util :as util]
             [malli.core :as m]))
 
@@ -271,8 +272,8 @@
 ;; Program is list of block items, which are themselves just blocks.
 (defn resolve-program [program]
   (let [res (:block (resolve-block program))
-        _ (m/coerce p/Program res)]
-   res))
+        _ (m/coerce s/Program res)]
+    res))
 
 (comment
 
@@ -290,7 +291,7 @@
       resolve-program)
 
   (pretty/explain
-   p/Program
+   s/Program
    (-> file-path
        slurp
        p/parse-from-src

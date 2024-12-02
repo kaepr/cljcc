@@ -3,6 +3,7 @@
    [cljcc.lexer :as l]
    [cljcc.util :as u]
    [cljcc.parser :as p]
+   [cljcc.exception :as exc]
    [cljcc.analyze.core :as a]))
 
 (defn- variable
@@ -31,7 +32,7 @@
     :complement :bit-not
     :hyphen :negate
     :logical-not :logical-not
-    (throw (ex-info "Tacky Error. Invalid unary operator." {op op}))))
+    (exc/tacky-error "Invalid unary operator." {op op})))
 
 (defn- assignment-operator->binary-operator
   "Converts parser assignment operator to binary operator keyword."
@@ -384,11 +385,12 @@
                                                :global?]))
         (assoc :instructions instructions))))
 
-(defn- tacky-static-variable [identifier global? initial-value]
+(defn- tacky-static-variable [identifier global? variable-type initial-value]
   {:identifier identifier
    :global? global?
    :initial-value initial-value
    :type :declaration
+   :variable-type variable-type
    :declaration-type :static-variable})
 
 (defn- tacky-static-variable-instructions [ident->symbols]
