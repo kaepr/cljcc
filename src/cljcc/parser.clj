@@ -3,6 +3,7 @@
    [cljcc.lexer :as l]
    [cljcc.token :as t]
    [malli.core :as m]
+   [malli.dev.pretty :as pretty]
    [clojure.math :refer [pow]]
    [cljcc.schema :as s]
    [cljcc.exception :as exc]
@@ -53,25 +54,30 @@
 (defn function-call-exp-node [identifier arguments]
   {:type :exp
    :exp-type :function-call-exp
+   :children [:arguments]
    :identifier identifier
-   :arguments arguments})
+   :arguments (vec arguments)})
 
 (defn cast-exp-node [target-type e]
   {:type :exp
    :exp-type :cast-exp
    :target-type target-type
+   :typed-inner e ; copy of e, for use in tacky phase
+   :children [:value]
    :value e})
 
 (defn unary-exp-node [op v]
   {:type :exp
    :exp-type :unary-exp
    :unary-operator op
+   :children [:value]
    :value v})
 
 (defn binary-exp-node [l r op]
   {:type :exp
    :exp-type :binary-exp
    :binary-operator op
+   :children [:left :right]
    :left l
    :right r})
 
@@ -79,12 +85,14 @@
   {:type :exp
    :exp-type :assignment-exp
    :assignment-operator op
+   :children [:left :right]
    :left l
    :right r})
 
 (defn conditional-exp-node [l m r]
   {:type :exp
    :exp-type :conditional-exp
+   :children [:left :right :middle]
    :left l
    :middle m
    :right r})
@@ -484,7 +492,7 @@
 
 (comment
 
-  (m/validate
+  (pretty/explain
    s/Program
    (parse-from-src
     "int main(void) {

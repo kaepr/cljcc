@@ -213,3 +213,24 @@
     :line line
     :col col
     :literal literal}))
+
+(def tacky-unary-ops
+  #{:bit-not :negate :logical-not})
+
+(def tacky-binary-ops
+  #{:add
+    :sub
+    :mul
+    :div
+    :mod
+    :equal
+    :not-equal
+    :less-than
+    :greater-than
+    :less-or-equal
+    :greater-or-equal
+    :bit-and
+    :bit-or
+    :bit-xor
+    :bit-right-shift
+    :bit-left-shift})

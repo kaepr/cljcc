@@ -52,7 +52,9 @@
    [:type [:= :exp]]
    [:exp-type [:= :cast-exp]]
    [:target-type #'Type]
+   [:typed-inner [:ref #'Exp]]
    [:value [:ref #'Exp]]
+   [:children [:= [:value]]]
    [:value-type {:optional true} #'Type]])
 
 (def UnaryExp
@@ -61,6 +63,7 @@
    [:exp-type [:= :unary-exp]]
    [:unary-operator `[:enum ~@t/unary-ops]]
    [:value [:ref #'Exp]]
+   [:children [:= [:value]]]
    [:value-type {:optional true} #'Type]])
 
 (def BinaryExp
@@ -70,6 +73,7 @@
    [:binary-operator `[:enum ~@(set (keys t/bin-ops))]]
    [:left [:ref #'Exp]]
    [:right [:ref #'Exp]]
+   [:children [:= [:left :right]]]
    [:value-type {:optional true} #'Type]])
 
 (def AssignmentExp
@@ -77,6 +81,7 @@
    [:type [:= :exp]]
    [:exp-type [:= :assignment-exp]]
    [:assignment-operator `[:enum ~@t/assignment-ops]]
+   [:children [:= [:left :right]]]
    [:left [:ref #'Exp]]
    [:right [:ref #'Exp]]
    [:value-type {:optional true} #'Type]])
@@ -85,6 +90,7 @@
   [:map
    [:type [:= :exp]]
    [:exp-type [:= :conditional-exp]]
+   [:children [:= [:left :right :middle]]]
    [:left [:ref #'Exp]]
    [:middle [:ref #'Exp]]
    [:right [:ref #'Exp]]
@@ -96,6 +102,7 @@
    [:exp-type [:= :function-call-exp]]
    [:identifier string?]
    [:arguments [:vector [:ref #'Exp]]]
+   [:children [:= [:arguments]]]
    [:value-type {:optional true} #'Type]])
 
 (def Exp
@@ -316,3 +323,127 @@
   [:map
    [:ident->symbol #'SymbolMap]
    [:program #'Program]])
+
+(def TackyVar
+  [:map
+   [:type [:= :variable]]
+   [:value string?]])
+
+(def TackyConstant
+  [:map
+   [:type [:= :constant]]
+   [:value #'Const]])
+
+(def TackyVal
+  [:schema {:registry {::mtacky-var #'TackyVar
+                       ::mtacky-constant #'TackyConstant}}
+   [:multi {:dispatch :type}
+    [:variable #'TackyVar]
+    [:constant #'TackyConstant]]])
+
+(def TackyReturn
+  [:map
+   [:type [:= :return]]
+   [:val #'TackyVal]])
+
+(def TackySignExtend
+  [:map
+   [:type [:= :sign-extend]]
+   [:src #'TackyVal]
+   [:dst #'TackyVal]])
+
+(def TackyTruncate
+  [:map
+   [:type [:= :truncate]]
+   [:src #'TackyVal]
+   [:dst #'TackyVal]])
+
+(def TackyUnary
+  [:map
+   [:type [:= :unary]]
+   [:unary-operator `[:enum ~@t/tacky-unary-ops]]
+   [:src #'TackyVal]
+   [:dst #'TackyVal]])
+
+(def TackyBinary
+  [:map
+   [:type [:= :binary]]
+   [:binary-operator `[:enum ~@t/tacky-binary-ops]]
+   [:src1 #'TackyVal]
+   [:src2 #'TackyVal]
+   [:dst #'TackyVal]])
+
+(def TackyCopy
+  [:map
+   [:type [:= :copy]]
+   [:src #'TackyVal]
+   [:dst #'TackyVal]])
+
+(def TackyJump
+  [:map
+   [:type [:= :jump]]
+   [:identifier string?]])
+
+(def TackyJumpIfZero
+  [:map
+   [:type [:= :jump-if-zero]]
+   [:val #'TackyVal]
+   [:identifier string?]])
+
+(def TackyJumpIfNotZero
+  [:map
+   [:type [:= :jump-if-not-zero]]
+   [:val #'TackyVal]
+   [:identifier string?]])
+
+(def TackyLabel
+  [:map
+   [:type [:= :label]]
+   [:identifier string?]])
+
+(def TackyFunCall
+  [:map
+   [:type [:= :fun-call]]
+   [:identifier string?]
+   [:arguments [:vector #'TackyVal]]
+   [:dst #'TackyVal]])
+
+(def TackyInstruction
+  [:multi {:dispatch :type}
+   [:return #'TackyReturn]
+   [:sign-extend #'TackySignExtend]
+   [:truncate #'TackyTruncate]
+   [:unary #'TackyUnary]
+   [:binary #'TackyBinary]
+   [:copy #'TackyCopy]
+   [:jump #'TackyJump]
+   [:jump-if-zero #'TackyJumpIfZero]
+   [:jump-if-not-zero #'TackyJumpIfNotZero]
+   [:label #'TackyLabel]
+   [:fun-call #'TackyFunCall]])
+
+(def TackyFunction
+  [:map
+   [:identifier string?]
+   [:global? boolean?]
+   [:type [:= :declaration]]
+   [:declaration-type [:= :function]]
+   [:parameters [:vector string?]]
+   [:instructions [:vector #'TackyInstruction]]])
+
+(def TackyStaticVariable
+  [:map
+   [:identifier string?]
+   [:global? boolean?]
+   [:variable-type #'Type]
+   [:initial #'Initial]
+   [:declaration-type [:= :static-variable]]
+   [:type [:= :declaration]]])
+
+(def TackyTopLevel
+  [:multi {:dispatch :declaration-type}
+   [:static-variable #'TackyStaticVariable]
+   [:function #'TackyFunction]])
+
+(def TackyProgram
+  [:vector #'TackyTopLevel])

@@ -2,6 +2,7 @@
   (:require [cljcc.parser :as p]
             [cljcc.exception :as exc]
             [cljcc.analyze.resolve :as r]
+            [cljcc.schema :as s]
             [cljcc.util :as util]
             [malli.dev.pretty :as pretty]))
 
@@ -87,14 +88,14 @@
       label-loops)
 
   (pretty/explain
-   p/Program
+   s/Program
    (-> "./test-programs/example.c"
        slurp
        p/parse-from-src
        r/resolve-program))
 
   (pretty/explain
-   p/Program
+   s/Program
    (-> "./test-programs/example.c"
        slurp
        p/parse-from-src

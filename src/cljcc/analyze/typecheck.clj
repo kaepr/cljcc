@@ -4,50 +4,21 @@
             [cljcc.parser :as p]
             [cljcc.token :as t]
             [cljcc.schema :as s]
+            [cljcc.symbol :as sym]
             [cljcc.analyze.resolve :as r]
             [cljcc.analyze.label-loops :as l]
             [cljcc.exception :as exc]))
 
 (declare typecheck-block typecheck-declaration to-static-init)
 
-(defn- create-symbol [type attribute]
-  {:type type
-   :attribute attribute})
-
-(defn- local-attribute []
-  {:type :local})
-
-(defn- static-attribute [initial-value global?]
-  {:type :static
-   :initial-value initial-value
-   :global? global?})
-
-(defn- set-type
+(defn set-type
   "Assocs onto an expression given type."
   [e t] (assoc e :value-type t))
 
-(defn- get-type [e] (:value-type e))
+(defn get-type [e] (:value-type e))
 
 (defn- symbol-function? [s]
   (= :function (:type (:type s))))
-
-(defn- no-initializer-iv []
-  {:type :no-initializer})
-
-(defn- tentative-iv []
-  {:type :tentative})
-
-(defn- initial-iv [static-init]
-  {:type :initial
-   :static-init static-init})
-
-(defn- int-init [v]
-  {:type :int-init
-   :value v})
-
-(defn- long-init [v]
-  {:type :long-init
-   :value v})
 
 (defmulti typecheck-exp
   "Returns the expression, after typechecking nested expressions."
@@ -93,7 +64,7 @@
     (set-type (p/cast-exp-node t e) t)))
 
 (defmethod typecheck-exp :binary-exp
-  [{:keys [left right binary-operator] :as e} ident->symbol]
+  [{:keys [left right binary-operator] :as _e} ident->symbol]
   (let
    [typed-left-e (typecheck-exp left ident->symbol)
     typed-right-e (typecheck-exp right ident->symbol)]
@@ -113,7 +84,7 @@
           (set-type typed-binary-exp {:type :int}))))))
 
 (defmethod typecheck-exp :assignment-exp
-  [{:keys [left right assignment-operator] :as e} ident->symbol]
+  [{:keys [left right assignment-operator] :as _e} ident->symbol]
   (let
    [typed-left (typecheck-exp left ident->symbol)
     typed-right (typecheck-exp right ident->symbol)
@@ -130,7 +101,7 @@
         common-type (get-common-type (get-type t-middle) (get-type t-right))
         convert-right (convert-to-exp t-right common-type)
         convert-middle (convert-to-exp t-middle common-type)
-        typed-cond-e (p/conditional-exp-node t-left t-middle t-right)]
+        typed-cond-e (p/conditional-exp-node t-left convert-middle convert-right)]
     (set-type typed-cond-e common-type)))
 
 (defmethod typecheck-exp :function-call-exp
@@ -194,14 +165,18 @@
   [return-type {:keys [condition body] :as stmt} m]
   (let [typed-cond (typecheck-exp condition m)
         typed-body (typecheck-statement return-type body m)]
-    {:statement (merge stmt (p/while-statement-node typed-cond typed-body))
+    {:statement (merge stmt (p/while-statement-node
+                             typed-cond
+                             (:statement typed-body)))
      :ident->symbol (:ident->symbol typed-body)}))
 
 (defmethod typecheck-statement :do-while
   [return-type {:keys [condition body] :as stmt} m]
   (let [typed-cond (typecheck-exp condition m)
         typed-body (typecheck-statement return-type body m)]
-    {:statement (merge stmt (p/do-while-statement-node typed-cond typed-body))
+    {:statement (merge stmt (p/do-while-statement-node
+                             typed-cond
+                             (:statement typed-body)))
      :ident->symbol (:ident->symbol typed-body)}))
 
 (defn- typecheck-optional-expression [e m]
@@ -220,6 +195,9 @@
         m' (if (:declaration f-init)
              (:ident->symbol f-init)
              m)
+        f-init (if (:declaration f-init)
+                 (:declaration f-init)
+                 f-init)
         t-condition (typecheck-optional-expression condition m')
         t-post (typecheck-optional-expression post m')
         typed-body-statement (typecheck-statement return-type body m')]
@@ -246,7 +224,7 @@
 (defmethod typecheck-statement :compound
   [return-type {:keys [block]} m]
   (let [typed-block (typecheck-block return-type block m)]
-    {:statement (p/compound-statement-node typed-block)
+    {:statement (p/compound-statement-node (:block typed-block))
      :ident->symbol (:ident->symbol typed-block)}))
 
 (defn- typecheck-item [return-type {:keys [type] :as item} m]
@@ -274,8 +252,8 @@
     (cond
       constant-exp? (to-static-init initial variable-type)
       (nil? initial) (if (= :extern storage-class)
-                       (no-initializer-iv)
-                       (tentative-iv))
+                       (sym/no-initializer-iv)
+                       (sym/tentative-iv))
       :else (exc/analyzer-error "Non-constant initializer." declaration))))
 
 (defn- const-convert [{ttype :type :as _target-type} {const-type :type value :value :as const}]
@@ -292,9 +270,9 @@
   (cond
     (= :constant-exp exp-type) (let [c-const (const-convert var-type value)]
                                  (cond
-                                   (= :int (:type c-const)) (initial-iv (int-init (:value c-const)))
-                                   (= :long (:type c-const)) (initial-iv (long-init (:value c-const)))))
-    (nil? e) (initial-iv (int-init 0))
+                                   (= :int (:type c-const)) (sym/initial-iv (sym/int-init (:value c-const)))
+                                   (= :long (:type c-const)) (sym/initial-iv (sym/long-init (:value c-const)))))
+    (nil? e) (sym/initial-iv (sym/int-init 0))
     :else (exc/analyzer-error "Non-constant initializer on static variable." e)))
 
 (defn- validate-file-scope-variable-declaration
@@ -336,7 +314,7 @@
     {:declaration d
      :ident->symbol (assoc ident->symbol
                            identifier
-                           (create-symbol variable-type (static-attribute initial-value global?)))}))
+                           (sym/create-symbol variable-type (sym/static-attribute initial-value global?)))}))
 
 (defn- typecheck-local-scope-variable-declaration
   [{:keys [identifier variable-type storage-class initial] :as d} ident->symbol]
@@ -352,31 +330,26 @@
                             ident->symbol
                             (assoc ident->symbol
                                    identifier
-                                   (create-symbol variable-type (static-attribute (no-initializer-iv) true))))]
+                                   (sym/create-symbol variable-type (sym/static-attribute (sym/no-initializer-iv) true))))]
               {:declaration d
                :ident->symbol symbols})
     :static (let [initial-value (to-static-init initial variable-type)
                   updated-symbols (assoc ident->symbol
                                          identifier
-                                         (create-symbol variable-type (static-attribute initial-value false)))]
+                                         (sym/create-symbol variable-type (sym/static-attribute initial-value false)))]
               {:declaration d
                :ident->symbol updated-symbols})
     (let [updated-symbols (assoc ident->symbol
                                  identifier
-                                 (create-symbol
+                                 (sym/create-symbol
                                   variable-type
-                                  (local-attribute)))
+                                  (sym/local-attribute)))
           casted-e (if (nil? initial)
                      initial
                      (convert-to-exp initial variable-type))
           t-e (typecheck-optional-expression casted-e updated-symbols)]
       {:declaration (assoc d :initial t-e)
        :ident->symbol updated-symbols})))
-
-(defn- fun-attribute [defined? global?]
-  {:type :fun
-   :defined? defined?
-   :global? global?})
 
 (defn- validate-old-fn-decl-return-attribute
   [cur-decl prev-symbol]
@@ -410,7 +383,7 @@
            ident->symbol
            (flatten
             (map (fn [p t]
-                   [p (create-symbol t (local-attribute))])
+                   [p (sym/create-symbol t (sym/local-attribute))])
                  parameters
                  (:parameter-types function-type))))))
 
@@ -423,10 +396,10 @@
                              (validate-old-fn-decl-return-attribute d prev-symbol)
                              {:defined? false
                               :global? (not= :static storage-class)})
-        function-attribute (fun-attribute (boolean (or defined? body?)) global?)
+        function-attribute (sym/fun-attribute (boolean (or defined? body?)) global?)
         updated-symbols (assoc ident->symbol
                                identifier
-                               (create-symbol
+                               (sym/create-symbol
                                 function-type
                                 function-attribute))]
     (if body?
@@ -438,7 +411,7 @@
                                                body
                                                (assoc with-parameter-symbols
                                                       :at-top-level false))]
-        {:declaration d
+        {:declaration (assoc d :body (:block with-body-symbols))
          :ident->symbol (assoc (:ident->symbol with-body-symbols)
                                :at-top-level true)})
       {:declaration d
@@ -473,7 +446,8 @@
         program (:program v)
         m (dissoc (:ident->symbol v) :at-top-level)
         _ (m/coerce s/Program program)
-        _ (m/coerce s/SymbolMap m)]
+        ;_ (m/coerce s/SymbolMap m)
+        ]
     {:program program
      :ident->symbol m}))
 

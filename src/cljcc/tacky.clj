@@ -4,7 +4,14 @@
    [cljcc.util :as u]
    [cljcc.parser :as p]
    [cljcc.exception :as exc]
-   [cljcc.analyze.core :as a]))
+   [cljcc.symbol :as sym]
+   [cljcc.analyze.resolve :as r]
+   [cljcc.analyze.label-loops :as label-loop]
+   [malli.dev.pretty :as pretty]
+   [cljcc.analyze.typecheck :as tc]
+   [cljcc.analyze.core :as a]
+   [malli.core :as m]
+   [cljcc.schema :as s]))
 
 (defn- variable
   ([]
@@ -17,13 +24,25 @@
   {:type :variable
    :value (:identifier v)})
 
+(defn tacky-var [identifier]
+  {:type :variable
+   :value identifier})
+
 (defn- label
   ([] (label "label"))
   ([ident] (u/create-identifier! ident)))
 
-(defn constant [^Integer v]
-  {:type :constant
+(defn- const-int [v]
+  {:type :int
    :value v})
+
+(defn- const-long [v]
+  {:type :long
+   :value v})
+
+(defn constant [const-value]
+  {:type :constant
+   :value const-value})
 
 (defn- unary-operator
   "Converts parser's unary operator to tacky representation."
@@ -48,7 +67,8 @@
     :assignment-bitwise-or :bitwise-or
     :assignment-bitwise-xor :bitwise-xor
     :assignment-bitwise-left-shift :bitwise-left-shift
-    :assignment-bitwise-right-shift :bitwise-right-shift))
+    :assignment-bitwise-right-shift :bitwise-right-shift
+    (exc/tacky-error "Invalid assignment operator." op)))
 
 (defn- binary-operator
   "Converts parser's binary operator to tacky representation."
@@ -70,7 +90,7 @@
     :bitwise-xor :bit-xor
     :bitwise-right-shift :bit-right-shift
     :bitwise-left-shift :bit-left-shift
-    (throw (ex-info "Tacky Error. Invalid binary operator." {binop binop}))))
+    (exc/tacky-error "Invalid binary operator." binop)))
 
 ;;;; Instructions
 
@@ -90,6 +110,16 @@
 (defn- return-instruction [val]
   {:type :return
    :val val})
+
+(defn- sign-extend-instruction [src dst]
+  {:type :sign-extend
+   :src src
+   :dst dst})
+
+(defn- truncate-instruction [src dst]
+  {:type :truncate
+   :src src
+   :dst dst})
 
 (defn- copy-instruction [src dst]
   {:type :copy
@@ -122,138 +152,230 @@
 
 ;;;; Expression handlers
 
-(declare expression-handler)
+;; Timothy Baldridge, Data all the ASTs
+(defn postwalk [ast f]
+  (f (reduce
+      (fn [acc key]
+        (let [value (get acc key)]
+          (if (vector? value)
+            (assoc acc key (doall (map (fn [node] (postwalk node f))
+                                       value)))
+            (assoc acc key (postwalk value f)))))
+      ast
+      (:children ast))))
 
-(defn- constant-expr-handler [e]
-  {:val (constant (:value e))})
+(defn- add-var-to-symbol [var var-type symbols]
+  (swap! symbols assoc (:value var) {:type var-type
+                                     :attribute (sym/local-attribute)}))
 
-(defn- unary-expr-handler [e]
-  (let [inner (expression-handler (:value e))
-        src (:val inner)
-        op (unary-operator (:unary-operator e))
+(defmulti exp-handler
+  (fn [exp _symbols]
+    (:exp-type exp)))
+
+(comment
+
+  (exp-handler
+   {:type :exp,
+    :exp-type :function-call-exp,
+    :children [:arguments],
+    :identifier "foo",
+    :arguments [],
+    :value-type {:type :long}}
+   (atom {}))
+
+  ())
+
+(comment
+
+  (exp-handler
+   {:type :exp,
+    :exp-type :variable-exp,
+    :identifier "x.5",
+    :value-type {:type :int}}
+   (atom {}))
+
+  ())
+
+(defmethod exp-handler :default
+  [_ _]
+  {:instructions []})
+
+(defmethod exp-handler :constant-exp
+  [exp _]
+  {:val (constant (:value exp))})
+
+(defmethod exp-handler :variable-exp
+  [exp _]
+  {:val (tacky-var (:identifier exp))})
+
+(defmethod exp-handler :cast-exp
+  [{:keys [target-type value typed-inner]} symbols]
+  (if (= target-type (tc/get-type typed-inner))
+    value
+    (let [dst (variable "cast_")
+          _ (add-var-to-symbol dst target-type symbols)
+          {res :val
+           insts :instructions} value]
+      (if (= :long (:type target-type))
+        {:val dst
+         :instructions (flatten [insts
+                                 (sign-extend-instruction res dst)])}
+        {:val dst
+         :instructions (flatten [insts
+                                 (truncate-instruction res dst)])}))))
+
+(defmethod exp-handler :unary-exp
+  [exp symbols]
+  (let [{src :val
+         insts :instructions} (:value exp)
+        op (unary-operator (:unary-operator exp))
         dst (variable (str "unary_result_" op))
-        instruction (unary-instruction op src dst)]
+        _ (add-var-to-symbol dst (tc/get-type exp) symbols)
+        inst (unary-instruction op src dst)]
     {:val dst
-     :instructions (flatten [(:instructions inner) instruction])}))
+     :instructions (flatten [insts inst])}))
 
-(defn- binary-expr-handler [e]
-  (let [e1 (expression-handler (:left e))
-        e2 (expression-handler (:right e))
-        src1 (:val e1)
-        src2 (:val e2)
-        op (binary-operator (:binary-operator e))
-        dst (variable (str "binary_result_" op))
-        instruction (binary-instruction op src1 src2 dst)]
-    {:val dst
-     :instructions (flatten [(:instructions e1) (:instructions e2) instruction])}))
-
-(defn- logical-and-handler [e]
-  (let [e1 (expression-handler (:left e))
-        e2 (expression-handler (:right e))
-        v1 (:val e1)
-        v2 (:val e2)
+(defn logical-and-binary-handler
+  [exp symbols]
+  (let [{v1 :val
+         insts1 :instructions} (:left exp)
+        {v2 :val
+         insts2 :instructions} (:right exp)
         res (variable "and_result")
+        _ (add-var-to-symbol res (tc/get-type exp) symbols)
         false-label (label "and_false")
         end-label (label "and_end")]
     {:val res
-     :instructions (flatten [(:instructions e1)
+     :instructions (flatten [insts1
                              (jump-if-zero-instruction v1 false-label)
-                             (:instructions e2)
+                             insts2
                              (jump-if-zero-instruction v2 false-label)
-                             (copy-instruction (constant 1) res)
+                             (copy-instruction (constant (const-int 1)) res)
                              (jump-instruction end-label)
                              (label-instruction false-label)
-                             (copy-instruction (constant 0) res)
+                             (copy-instruction (constant (const-int 0)) res)
                              (label-instruction end-label)])}))
 
-(defn- logical-or-handler [e]
-  (let [e1 (expression-handler (:left e))
-        e2 (expression-handler (:right e))
-        v1 (:val e1)
-        v2 (:val e2)
+(defn logical-or-binary-handler
+  [exp symbols]
+  (let [{v1 :val
+         insts1 :instructions} (:left exp)
+        {v2 :val
+         insts2 :instructions} (:right exp)
         res (variable "or_result")
+        _ (add-var-to-symbol res (tc/get-type exp) symbols)
         false-label (label "or_false")
         end-label (label "or_end")]
     {:val res
-     :instructions (flatten [(:instructions e1)
+     :instructions (flatten [insts1
                              (jump-if-not-zero-instruction v1 end-label)
-                             (:instructions e2)
+                             insts2
                              (jump-if-not-zero-instruction v2 end-label)
-                             (copy-instruction (constant 0) res)
+                             (copy-instruction (constant (const-int 0)) res)
                              (jump-instruction false-label)
                              (label-instruction end-label)
-                             (copy-instruction (constant 1) res)
+                             (copy-instruction (constant (const-int 1)) res)
                              (label-instruction false-label)])}))
 
-(defn- assignment-exp-handler [e]
-  (let [asop (:assignment-operator e)
-        direct-assignment? (= asop :assignment)
-        var (parsed-var->tacky-var (:left e))] ; guaranteed to be parsed variable
-    (if direct-assignment?
-      (let [rhs (expression-handler (:right e))]
-        {:val var
-         :instructions (flatten [(:instructions rhs)
-                                 (copy-instruction (:val rhs) var)])})
-      (let [bin-op (assignment-operator->binary-operator (:assignment-operator e))
-            bin-exp (p/binary-exp-node (:left e) (:right e) bin-op)
-            rhs (expression-handler bin-exp)]
-        {:val var
-         :instructions (flatten [(:instructions rhs)
-                                 (copy-instruction (:val rhs) var)])}))))
-
-(defn- conditional-exp-handler [e]
-  (let [ce (expression-handler (:left e))
-        cv (:val ce)
-        then-e (expression-handler (:middle e))
-        else-e (expression-handler (:right e))
-        end-label (label "conditional_end")
-        else-label (label "conditional_else")
-        res (variable "conditional_result")]
-    {:val res
-     :instructions (flatten
-                    [(:instructions ce)
-                     (jump-if-zero-instruction cv else-label)
-                     (:instructions then-e)
-                     (copy-instruction (:val then-e) res)
-                     (jump-instruction end-label)
-                     (label-instruction else-label)
-                     (:instructions else-e)
-                     (copy-instruction (:val else-e) res)
-                     (label-instruction end-label)])}))
-
-(defn- function-call-exp-handler [{identifier :identifier arguments :arguments}]
-  (let [arg-exps (mapv expression-handler arguments)
-        dst (variable (str "function_call_result_" identifier))
-        fn-instruction (fun-call-instruction identifier (mapv #(:val %) arg-exps) dst)]
+(defn binary-exp-handler
+  [exp symbols]
+  (let [{v1 :val
+         insts1 :instructions} (:left exp)
+        {v2 :val
+         insts2 :instructions} (:right exp)
+        op (binary-operator (:binary-operator exp))
+        dst (variable (str "binary_result_" op))
+        _ (add-var-to-symbol dst (tc/get-type exp) symbols)
+        binary-inst (binary-instruction op v1 v2 dst)]
     {:val dst
-     :instructions (flatten [(mapv #(:instructions %) arg-exps) fn-instruction])}))
+     :instructions (flatten [insts1
+                             insts2
+                             binary-inst])}))
 
-(defn- expression-handler [e]
-  (when-let [exp-type (:exp-type e)]
-    (condp = exp-type
-      :constant-exp (constant-expr-handler e)
-      :unary-exp (unary-expr-handler e)
-      :binary-exp (let [op (:binary-operator e)]
-                    (condp = op
-                      :logical-and (logical-and-handler e)
-                      :logical-or (logical-or-handler e)
-                      (binary-expr-handler e)))
-      :variable-exp {:val (parsed-var->tacky-var e)}
-      :assignment-exp (assignment-exp-handler e)
-      :conditional-exp (conditional-exp-handler e)
-      :function-call-exp (function-call-exp-handler e)
-      (throw (ex-info "Tacky error. Invalid expression." {e e})))))
+(defmethod exp-handler :binary-exp
+  [exp symbols]
+  (let [op (:binary-operator exp)]
+    (condp = op
+      :logical-and (logical-and-binary-handler exp symbols)
+      :logical-or (logical-or-binary-handler exp symbols)
+      (binary-exp-handler exp symbols))))
 
-(defn- exp-instructions [exp]
-  (expression-handler exp))
+(defmethod exp-handler :assignment-exp
+  [exp symbols]
+  (let [op (:assignment-operator exp)
+        var (:val (:left exp)); guaranteed to be a TackyVariable
+        direct-assignment? (= op :assignment)]
+    (if direct-assignment?
+      (let [{dst :val
+             insts :instructions} (:right exp)]
+        {:val var
+         :instructions (flatten [insts
+                                 (copy-instruction dst var)])})
+      (let [bin-op (assignment-operator->binary-operator op)
+            bin-exp (p/binary-exp-node (:left exp) (:right exp) bin-op)
+            {rhs :val
+             insts :instructions} (exp-handler bin-exp symbols)]
+        {:val rhs
+         :instructions (flatten [insts
+                                 (copy-instruction rhs var)])}))))
+
+(defmethod exp-handler :conditional-exp
+  [exp symbols]
+  (let [{condition-val :val
+         condition-insts :instructions} (:left exp)
+        {then-val :val
+         then-insts :instructions} (:middle exp)
+        {else-val :val
+         else-insts :instructions} (:right exp)
+        end-label (label "condition_end")
+        else-label (label "conditional_else")
+        res (variable "conditional_result")
+        _ (add-var-to-symbol res (tc/get-type exp) symbols)]
+    {:val res
+     :instructions (flatten [condition-insts
+                             (jump-if-zero-instruction condition-val else-label)
+                             then-insts
+                             (copy-instruction then-val res)
+                             (jump-instruction end-label)
+                             (label-instruction else-label)
+                             else-insts
+                             (copy-instruction else-val res)
+                             (label-instruction end-label)])}))
+
+(defmethod exp-handler :function-call-exp
+  [{identifier :identifier
+    arguments :arguments :as exp} symbols]
+  (let [dst (variable (str "function_call_result_" identifier))
+        _ (add-var-to-symbol dst (tc/get-type exp) symbols)
+        fn-instruction (fun-call-instruction identifier
+                                             (mapv #(:val %) arguments)
+                                             dst)]
+    {:val dst
+     :instructions (flatten [(mapv #(:instructions %) arguments)
+                             fn-instruction])}))
+
+(defn run-expression-handler
+  "Transforms a expression to tacky variable and instructions.
+
+  Parameters:
+    exp: Expression to be parsed
+    symbols: Atom for symbol map"
+  [exp symbols]
+  (postwalk exp #(exp-handler % symbols)))
+
+(comment
+
+  ())
+
+;;;; Statement Handlers
 
 (declare statement->tacky-instruction block-item->tacky-instruction)
 
-(defn if-statement-handler [s]
-  (let [cond-exp (exp-instructions (:condition s))
+(defn if-statement-handler [s symbols]
+  (let [cond-exp (run-expression-handler (:condition s) symbols)
         cond-value (:val cond-exp)
         cond-instructions (:instructions cond-exp)
-        then-instructions (statement->tacky-instruction (:then-statement s))
+        then-instructions (statement->tacky-instruction (:then-statement s) symbols)
         end-label (label "if_end")
         else-label (label "if_else")
         else? (:else-statement s)]
@@ -263,29 +385,29 @@
        then-instructions
        (jump-instruction end-label)
        (label-instruction else-label)
-       (statement->tacky-instruction (:else-statement s))
+       (statement->tacky-instruction (:else-statement s) symbols)
        (label-instruction end-label)]
       [cond-instructions
        (jump-if-zero-instruction cond-value end-label)
        then-instructions
        (label-instruction end-label)])))
 
-(defn- compound-statement-handler [s]
-  (flatten (mapv block-item->tacky-instruction (:block s))))
+(defn- compound-statement-handler [s symbols]
+  (flatten (mapv #(block-item->tacky-instruction % symbols) (:block s))))
 
-(defn- break-statement-handler [s]
+(defn- break-statement-handler [s _]
   [(jump-instruction (str "break_" (:label s)))])
 
-(defn- continue-statement-handler [s]
+(defn- continue-statement-handler [s _]
   [(jump-instruction (str "continue_" (:label s)))])
 
-(defn- while-statement-handler [s]
+(defn- while-statement-handler [s symbols]
   (let [continue-label (str "continue_" (:label s))
         break-label (str "break_" (:label s))
-        cond-exp (exp-instructions (:condition s))
+        cond-exp (run-expression-handler (:condition s) symbols)
         cond-value (:val cond-exp)
         cond-instructions (:instructions cond-exp)
-        body-instructions (statement->tacky-instruction (:body s))]
+        body-instructions (statement->tacky-instruction (:body s) symbols)]
     (flatten [(label-instruction continue-label)
               cond-instructions
               (jump-if-zero-instruction cond-value break-label)
@@ -293,14 +415,14 @@
               (jump-instruction continue-label)
               (label-instruction break-label)])))
 
-(defn- do-while-statement-handler [s]
+(defn- do-while-statement-handler [s symbols]
   (let [start-label (label "do_while_start")
         continue-label (str "continue_" (:label s))
         break-label (str "break_" (:label s))
-        cond-exp (exp-instructions (:condition s))
+        cond-exp (run-expression-handler (:condition s) symbols)
         cond-value (:val cond-exp)
         cond-instructions (:instructions cond-exp)
-        body-instructions (statement->tacky-instruction (:body s))]
+        body-instructions (statement->tacky-instruction (:body s) symbols)]
     (flatten [(label-instruction start-label)
               body-instructions
               (label-instruction continue-label)
@@ -308,20 +430,20 @@
               (jump-if-not-zero-instruction cond-value start-label)
               (label-instruction break-label)])))
 
-(defn- for-statement-handler [s]
+(defn- for-statement-handler [s symbols]
   (let [init-instructions (if (= :declaration (:type (:init s)))
-                            (block-item->tacky-instruction (:init s))
-                            (:instructions (exp-instructions (:init s))))
+                            (block-item->tacky-instruction (:init s) symbols)
+                            (:instructions (run-expression-handler (:init s) symbols)))
         start-label (label "for_start")
         break-label (str "break_" (:label s))
         continue-label (str "continue_" (:label s))
         cond? (not (nil? (:condition s)))
-        body-instructions (statement->tacky-instruction (:body s))
+        body-instructions (statement->tacky-instruction (:body s) symbols)
         post-instructions (if (nil? (:post s))
                             []
-                            (:instructions (exp-instructions (:post s))))
+                            (:instructions (run-expression-handler (:post s) symbols)))
         cond-instructions (if cond?
-                            (let [ce (exp-instructions (:condition s))
+                            (let [ce (run-expression-handler (:condition s) symbols)
                                   ce-inst (:instructions ce)
                                   ce-v (:val ce)]
                               [ce-inst
@@ -337,90 +459,99 @@
       (jump-instruction start-label)
       (label-instruction break-label)])))
 
-(defn- statement->tacky-instruction [s]
+(defn- statement->tacky-instruction [s symbols]
   (condp = (:statement-type s)
-    :return (let [e (exp-instructions (:value s))
+    :return (let [e (run-expression-handler (:value s) symbols)
                   val (:val e)
                   instructions (:instructions e)]
               (conj (vec instructions) (return-instruction val)))
-    :expression [(:instructions (exp-instructions (:value s)))]
-    :if (if-statement-handler s)
-    :compound (compound-statement-handler s)
-    :break (break-statement-handler s)
-    :continue (continue-statement-handler s)
-    :for (for-statement-handler s)
-    :while (while-statement-handler s)
-    :do-while (do-while-statement-handler s)
+    :expression [(:instructions (run-expression-handler (:value s) symbols))]
+    :if (if-statement-handler s symbols)
+    :compound (compound-statement-handler s symbols)
+    :break (break-statement-handler s symbols)
+    :continue (continue-statement-handler s symbols)
+    :for (for-statement-handler s symbols)
+    :while (while-statement-handler s symbols)
+    :do-while (do-while-statement-handler s symbols)
     :empty []
-    (throw (ex-info "Tacky error. Invalid statement." {:statement s}))))
+    (exc/tacky-error "Invalid statement" s)))
 
-(defn- declaration->tacky-instruction [d]
+(defn- declaration->tacky-instruction [d symbols]
   (when (:initial d)
     (let [local? (nil? (:storage-class d))
           var (parsed-var->tacky-var d) ; only needs :identifier key in declaration
-          rhs (exp-instructions (:initial d))]
+          rhs (run-expression-handler (:initial d) symbols)]
       (if local?
         (flatten [(:instructions rhs) (copy-instruction (:val rhs) var)])
         [])))) ; ignoring initializers for non local variable declarations
 
-(defn- block-item->tacky-instruction [item]
+(defn- block-item->tacky-instruction [item symbols]
   (condp = (:type item)
-    :statement (statement->tacky-instruction item)
-    :declaration (declaration->tacky-instruction item)
-    (throw (ex-info "Tacky error. Invalid block item." {:item item}))))
+    :statement (statement->tacky-instruction item symbols)
+    :declaration (declaration->tacky-instruction item symbols)
+    (exc/tacky-error "Invalid block item." item)))
 
-(defn- function-definition->tacky-function [function-definition ident->symbol]
-  (let [add-return (fn [xs] (conj (vec xs) (return-instruction (constant 0))))
+(defn- function-definition->tacky-function [function-definition symbols]
+  (let [add-return (fn [xs] (conj (vec xs) (return-instruction (constant {:type :int :value 0}))))
         instructions (->> function-definition
                           :body
                           (remove nil?)
-                          (mapv block-item->tacky-instruction)
+                          (mapv #(block-item->tacky-instruction % symbols))
                           flatten
                           (remove nil?)
                           add-return)]
     (-> function-definition
         (dissoc :body)
-        (assoc :global? (get-in ident->symbol [(:identifier function-definition)
-                                               :attrs
-                                               :global?]))
+        (assoc :global? (get-in @symbols [(:identifier function-definition)
+                                          :attribute
+                                          :global?]))
         (assoc :instructions instructions))))
 
-(defn- tacky-static-variable [identifier global? variable-type initial-value]
+(defn- tacky-static-variable [identifier global? variable-type initial]
   {:identifier identifier
    :global? global?
-   :initial-value initial-value
+   :initial initial
    :type :declaration
    :variable-type variable-type
    :declaration-type :static-variable})
 
-(defn- tacky-static-variable-instructions [ident->symbols]
-  (reduce
-   (fn [acc [k v]]
-     (if (string? k)
-       (if (= :static (get-in v [:attrs :type]))
-         (condp = (get-in v [:attrs :initial-value :type])
-           :initial (conj acc (tacky-static-variable k (get-in v [:attrs :global?]) (get-in v [:attrs :initial-value :value])))
-           :tentative (conj acc (tacky-static-variable k (get-in v [:attrs :global?]) 0))
-           acc)
-         acc)
-       acc))
-   []
-   ident->symbols))
+(defn- tacky-static-variable-instructions
+  "Generates list of tacky static variable from symbol map."
+  [ident->symbol]
+  (let [rf (fn [acc [k v]]
+             (if (= :static (get-in v [:attribute :type]))
+               (let [vtype (get-in v [:type])
+                     global? (get-in v [:attribute :global?])
+                     initial (get-in v [:attribute :initial-value])
+                     tentative-initial (if (= :int (:type vtype))
+                                         (sym/initial-iv (sym/int-init 0))
+                                         (sym/initial-iv (sym/long-init 0)))
+                     itype (get-in v [:attribute :initial-value :type])]
+                 (condp = itype
+                   :initial (conj acc (tacky-static-variable k global? vtype initial))
+                   :tentative (conj acc (tacky-static-variable k global? vtype tentative-initial))
+                   acc))
+               acc))]
+    (reduce rf [] ident->symbol)))
 
-(defn- tacky-function-instructions [ast ident->symbol]
+(defn- tacky-function-instructions [ast symbols]
   (let [fn-defined? (fn [x] (if (= :function (:declaration-type x))
                               (or (= (:identifier x) "main") (seq (:body x)))
                               true))]
     (->> ast
          (filterv #(= :function (:declaration-type %)))
          (filterv fn-defined?)
-         (mapv #(function-definition->tacky-function % ident->symbol)))))
+         (mapv #(function-definition->tacky-function % symbols)))))
 
-(defn tacky-generate [{ast :block ident->symbol :ident->symbol}]
+(defn tacky-generate [{ast :program ident->symbol :ident->symbol}]
   (let [variable-instructions (tacky-static-variable-instructions ident->symbol)
-        function-instructions (tacky-function-instructions ast ident->symbol)]
-    {:program (concat variable-instructions function-instructions)
-     :ident->symbol ident->symbol}))
+        symbols (atom ident->symbol)
+        function-instructions (tacky-function-instructions ast symbols)
+        program (vec (concat variable-instructions function-instructions))
+        _ (m/coerce s/TackyProgram program)
+        _ (m/coerce s/SymbolMap @symbols)]
+    {:program program
+     :ident->symbol @symbols}))
 
 (defn tacky-from-src [src]
   (-> src
@@ -430,6 +561,55 @@
       tacky-generate))
 
 (comment
+
+  (def tmp
+    "
+long foo(void) {
+    return 1;
+}
+
+int bar(int x, int y) {
+ return x + y;
+}
+
+int main(void) {
+int x = 6;
+return (long) foo() + 2 + x + bar(x, 7) + (3 ? 4 : 5);
+
+}")
+
+  (-> tmp
+      l/lex
+      p/parse
+      a/validate)
+
+  (tacky-from-src tmp)
+
+  ())
+
+(comment
+
+  (def ex "
+long foo(void) {
+    return 1;
+}
+
+int bar(int x, int y) {
+ return x + y;
+}
+
+int main(void) {
+int x = 6;
+return (long) foo() + 2 + x + bar(x, 7) + (3 ? 4 : 5);
+}")
+
+  (-> ex
+      l/lex
+      p/parse
+      a/validate)
+
+  (tacky-from-src
+   "int main(void) { return 42; }")
 
   (tacky-from-src
    "
@@ -448,5 +628,35 @@ int main(void) {
 int foo;
 
 ")
+
+  (def file-path "./test-programs/example.c")
+
+  (slurp "./test-programs/example.c")
+
+  (-> file-path
+      slurp
+      p/parse-from-src
+      a/validate)
+
+  (-> file-path
+      slurp
+      p/parse-from-src
+      a/validate
+      tacky-generate)
+
+  (pretty/explain
+   s/TackyProgram
+   (-> file-path
+       slurp
+       p/parse-from-src
+       a/validate
+       tacky-generate
+       :program))
+
+  (-> file-path
+      slurp
+      p/parse-from-src
+      a/validate
+      tacky-generate)
 
   ())

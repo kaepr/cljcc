@@ -2,8 +2,7 @@
   (:require
    [cljcc.util :refer [get-os]]
    [cljcc.compiler :as c]
-   [clojure.string :as str]
-   [cljcc.symbols :as symbols]))
+   [clojure.string :as str]))
 
 (defn- handle-label [identifier]
   (condp = (get-os)
@@ -19,7 +18,8 @@
 (defn- handle-current-translation-unit [name]
   (if (= :mac (get-os))
     (handle-symbol-name name)
-    (if (contains? @symbols/symbols name)
+    (if (;check if sym exists inside symbol map
+         )
       name
       (str name "@PLT"))))
 
