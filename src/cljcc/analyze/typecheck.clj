@@ -445,7 +445,7 @@
   (let [v (typecheck-program program)
         program (:program v)
         m (dissoc (:ident->symbol v) :at-top-level)
-        _ (m/coerce s/Program program)
+        ;_ (m/coerce s/Program program)
         ;_ (m/coerce s/SymbolMap m)
         ]
     {:program program

@@ -5,12 +5,9 @@
    [cljcc.parser :as p]
    [cljcc.exception :as exc]
    [cljcc.symbol :as sym]
-   [cljcc.analyze.resolve :as r]
-   [cljcc.analyze.label-loops :as label-loop]
    [malli.dev.pretty :as pretty]
    [cljcc.analyze.typecheck :as tc]
    [cljcc.analyze.core :as a]
-   [malli.core :as m]
    [cljcc.schema :as s]))
 
 (defn- variable
@@ -171,30 +168,6 @@
 (defmulti exp-handler
   (fn [exp _symbols]
     (:exp-type exp)))
-
-(comment
-
-  (exp-handler
-   {:type :exp,
-    :exp-type :function-call-exp,
-    :children [:arguments],
-    :identifier "foo",
-    :arguments [],
-    :value-type {:type :long}}
-   (atom {}))
-
-  ())
-
-(comment
-
-  (exp-handler
-   {:type :exp,
-    :exp-type :variable-exp,
-    :identifier "x.5",
-    :value-type {:type :int}}
-   (atom {}))
-
-  ())
 
 (defmethod exp-handler :default
   [_ _]
@@ -362,10 +335,6 @@
     symbols: Atom for symbol map"
   [exp symbols]
   (postwalk exp #(exp-handler % symbols)))
-
-(comment
-
-  ())
 
 ;;;; Statement Handlers
 
@@ -548,8 +517,9 @@
         symbols (atom ident->symbol)
         function-instructions (tacky-function-instructions ast symbols)
         program (vec (concat variable-instructions function-instructions))
-        _ (m/coerce s/TackyProgram program)
-        _ (m/coerce s/SymbolMap @symbols)]
+        ;_ (m/coerce s/TackyProgram program)
+        ;_ (m/coerce s/SymbolMap @symbols)
+        ]
     {:program program
      :ident->symbol @symbols}))
 
