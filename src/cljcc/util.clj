@@ -87,7 +87,7 @@
           _ (-> strip-l-or-L
                 Long/parseLong
                 Long/toString)]
-        s)
+      s)
     (catch Exception _e
       false)))
 
@@ -102,3 +102,17 @@
     (exc/lex-error {:line line
                     :col col})))
 
+(defn round-away-from-zero [num div]
+  (let [div (abs div)]
+    (cond
+      (= (mod num div) 0) num
+      (< num 0) (- num (- div (mod num div)))
+      :else (+ num (- div (mod num div))))))
+
+(defn in-int-range?
+  "Verifies whether -2^31 <= x <= 2^31."
+  [v]
+  (and (>= v Integer/MIN_VALUE)
+       (<= v Integer/MAX_VALUE)))
+
+(not (in-int-range? Long/MAX_VALUE))

@@ -40,7 +40,7 @@
         preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
         file (io/file preprocessed-file-path)
         source (slurp file)
-        assembly-ast (c/generate-assembly source)
+        assembly-ast (c/assembly source)
         assembly-output (e/emit assembly-ast)
         assembly-out-file-path (make-file-name directory (remove-extension filename) "s")
         _ (println assembly-output)
@@ -92,7 +92,7 @@
   (let [preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
         file (io/file preprocessed-file-path)
         source (slurp file)
-        assembly-ast (c/generate-assembly source)]
+        assembly-ast (c/assembly source)]
     (log/info (str "Succesfully generated assembly ast.\n" assembly-ast))))
 
 (defn- cleanup-step [directory filename]

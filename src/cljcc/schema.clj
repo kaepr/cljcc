@@ -447,3 +447,187 @@
 
 (def TackyProgram
   [:vector #'TackyTopLevel])
+
+;;;; Assembly AST
+
+(def AssemblyType [:enum :longword :quadword])
+
+(def CondCode [:enum :e :ne :g :ge :l :le])
+
+(def Register [:enum :ax :dx :di :si :r8 :r9 :r10 :r11 :cx :cl :sp])
+
+(def AssemblyImmOperand
+  [:map
+   [:operand [:= :imm]]
+   [:value int?]])
+
+(def AssemblyRegOperand
+  [:map
+   [:operand [:= :reg]]
+   [:register #'Register]])
+
+(def AssemblyPseudoOperand
+  [:map
+   [:operand [:= :pseudo]]
+   [:identifier string?]])
+
+(def AssemblyStackOperand
+  [:map
+   [:operand [:= :stack]]
+   [:value int?]])
+
+(def AssemblyDataOperand
+  [:map
+   [:operand [:= :data]]
+   [:identifier string?]])
+
+(def AssemblyOperand
+  [:multi {:dispatch :operand}
+   [:imm #'AssemblyImmOperand]
+   [:stack #'AssemblyStackOperand]
+   [:pseudo #'AssemblyPseudoOperand]
+   [:data #'AssemblyDataOperand]
+   [:reg #'AssemblyRegOperand]])
+
+(def AssemblyRetInstruction
+  [:map
+   [:op [:= :ret]]])
+
+(def AssemblyCallInstruction
+  [:map
+   [:op [:= :call]]
+   [:identifier string?]])
+
+(def AssemblyPushInstruction
+  [:map
+   [:op [:= :push]]
+   [:operand #'AssemblyOperand]])
+
+(def AssemblyLabelInstruction
+  [:map
+   [:op [:= :label]]
+   [:identifier string?]])
+
+(def AssemblySetCCInstruction
+  [:map
+   [:op [:= :setcc]]
+   [:operand #'AssemblyOperand]
+   [:cond-code #'CondCode]])
+
+(def AssemblyJmpCCInstruction
+  [:map
+   [:op [:= :jmpcc]]
+   [:operand #'AssemblyOperand]
+   [:identifier string?]])
+
+(def AssemblyJmpInstruction
+  [:map
+   [:op [:= :jmp]]
+   [:identifier string?]])
+
+(def AssemblyCdqInstruction
+  [:map
+   [:op [:= :cdq]]
+   [:assembly-type #'AssemblyType]])
+
+(def AssemblyIdivInstruction
+  [:map
+   [:op [:= :idiv]]
+   [:assembly-type #'AssemblyType]
+   [:operand #'AssemblyOperand]])
+
+(def AssemblyCmpInstruction
+  [:map
+   [:op [:= :cmp]]
+   [:assembly-type #'AssemblyType]
+   [:src #'AssemblyOperand]
+   [:dst #'AssemblyOperand]])
+
+(def AssemblyBinaryInstruction
+  [:map
+   [:op [:= :binary]]
+   [:assembly-type #'AssemblyType]
+   [:binary-operator `[:enum ~@t/tacky-binary-ops]]
+   [:src #'AssemblyOperand]
+   [:dst #'AssemblyOperand]])
+
+(def AssemblyUnaryInstruction
+  [:map
+   [:op [:= :unary]]
+   [:assembly-type #'AssemblyType]
+   [:unary-operator `[:enum ~@t/tacky-unary-ops]]
+   [:operand #'AssemblyOperand]])
+
+(def AssemblyMovsxInstruction
+  [:map
+   [:op [:= :movsx]]
+   [:src #'AssemblyOperand]
+   [:dst #'AssemblyOperand]])
+
+(def AssemblyMovInstruction
+  [:map
+   [:op [:= :mov]]
+   [:assembly-type #'AssemblyType]
+   [:src #'AssemblyOperand]
+   [:dst #'AssemblyOperand]])
+
+(def AssemblyInstruction
+  [:multi {:dispatch :op}
+   [:mov #'AssemblyMovInstruction]
+   [:movsx #'AssemblyMovsxInstruction]
+   [:unary #'AssemblyUnaryInstruction]
+   [:binary #'AssemblyBinaryInstruction]
+   [:cmp #'AssemblyCmpInstruction]
+   [:idiv #'AssemblyIdivInstruction]
+   [:cdq #'AssemblyCdqInstruction]
+   [:jmp #'AssemblyJmpInstruction]
+   [:jmpcc #'AssemblyJmpCCInstruction]
+   [:setcc #'AssemblySetCCInstruction]
+   [:label #'AssemblyLabelInstruction]
+   [:push #'AssemblyPushInstruction]
+   [:call #'AssemblyCallInstruction]
+   [:ret #'AssemblyRetInstruction]])
+
+(def AssemblyStaticVariable
+  [:map
+   [:op [:= :static-variable]]
+   [:global? boolean?]
+   [:identifier string?]
+   [:alignment int?]
+   [:initial #'Initial]])
+
+(def AssemblyFunction
+  [:map
+   [:op [:= :function]]
+   [:identifier string?]
+   [:global? boolean?]
+   [:instructions [:vector #'AssemblyInstruction]]])
+
+(def AssemblyTopLevel
+  [:multi {:dispatch :op}
+   [:static-variable #'AssemblyStaticVariable]
+   [:function #'AssemblyFunction]])
+
+(def AssemblyProgram
+  [:vector #'AssemblyTopLevel])
+
+;;;; Backend symbol table
+
+(def ObjEntry
+  [:map
+   [:type [:= :obj-entry]]
+   [:assembly-type #'AssemblyType]
+   [:static? boolean?]])
+
+(def FunEntry
+  [:map
+   [:type [:= :fun-entry]]
+   [:defined? boolean?]])
+
+(def AsmSymtabEntry
+  [:multi {:dispatch :type}
+   [:obj-entry #'ObjEntry]
+   [:fun-entry #'FunEntry]])
+
+(def BackendSymbolMap
+  [:map-of string? #'AsmSymtabEntry])
