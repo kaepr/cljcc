@@ -16,3 +16,6 @@
 
 (defn compiler-error [msg data]
   (throw (ex-info msg (merge {:error/type :compiler} data))))
+
+(defn emit-error [msg data]
+  (throw (ex-info msg (merge {:error/type :emit} data))))

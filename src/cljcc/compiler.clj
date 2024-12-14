@@ -8,7 +8,8 @@
             [malli.core :as m]
             [malli.dev.pretty :as pretty]
             [cljcc.util :as util]
-            [cljcc.exception :as exc]))
+            [cljcc.exception :as exc]
+            [clojure.string :as str]))
 
 (def registers #{:ax :dx :di :si :r8 :r9 :r10 :r11 :cx :cl :sp})
 
@@ -75,14 +76,6 @@
   {:op :label
    :identifier identifier})
 
-(defn- allocate-stack-instruction [v]
-  {:op :allocate-stack
-   :value v})
-
-(defn- deallocate-stack-instruction [v]
-  {:op :deallocate-stack
-   :value v})
-
 (defn- push-instruction [operand]
   {:op :push
    :operand operand})
@@ -118,11 +111,6 @@
 (defn- data-operand [identifier]
   {:operand :data
    :identifier identifier})
-
-(defn- memory-address? [operand]
-  (or (contains? #{:data :stack} operand) ;; TODO: remove this check once refactored
-      (contains? #{:data :stack} (:operand operand))
-      (contains? #{:data :stack} (:operand-type operand))))
 
 ;;;; Tacky -> Instructions
 
@@ -296,7 +284,8 @@
   (let [arg-mov-instruction (fn [arg]
                               (let [operand (tacky-val->assembly-operand arg)
                                     operand-assembly-type (tacky-val->assembly-type arg m)
-                                    operand-type (:type operand)
+                                    operand-type (:operand operand)
+                                    _ (prn "********* operand-type" operand-type)
                                     reg-or-imm? (or (= operand-type :imm) (= operand-type :reg))]
                                 (if reg-or-imm?
                                   [(push-instruction operand)]
@@ -315,11 +304,11 @@
   (let [[register-args stack-args] (split-at 6 arguments)
         stack-padding (if (odd? (count stack-args)) 8 0)
         fix-stack-alignment-instruction (if (not= stack-padding 0)
-                                          [(allocate-stack-instruction stack-padding)]
+                                          [(binary-instruction :sub :quadword (imm-operand stack-padding) (reg-operand :sp))]
                                           [])
         bytes-to-remove (+ stack-padding (* 8 (count stack-args)))
         deallocate-arguments-instruction (if (not= bytes-to-remove 0)
-                                           [(deallocate-stack-instruction bytes-to-remove)]
+                                           [(binary-instruction :add :quadword (imm-operand bytes-to-remove) (reg-operand :sp))]
                                            [])
         assembly-dst (tacky-val->assembly-operand t-dst)
         dst-type (tacky-val->assembly-type t-dst m)]
@@ -368,8 +357,7 @@
                assembly-type (get-in ident->asm-entry [identifier :assembly-type])
                alignment-size (assembly-type->size assembly-type)
                new-offset (util/round-away-from-zero
-                           (- current-stack-val alignment-size) alignment-size)
-               _ (prn current-stack-val alignment-size new-offset)]
+                           (- current-stack-val alignment-size) alignment-size)]
            (assoc acc
                   identifier new-offset
                   "current" new-offset)))))
@@ -402,7 +390,7 @@
                                  (and
                                   (= :pseudo operand-type)
                                   (contains? ident->asm-entry identifier)
-                                  (:static (get ident->asm-entry identifier)))))
+                                  (:static? (get ident->asm-entry identifier)))))
         replace-pseudo-with-data-op (fn [inst path]
                                       (if (pseudo-data-operand? inst path)
                                         (assoc inst path (data-operand (get-in inst [path :identifier])))
@@ -520,7 +508,7 @@
         :guard [(comp imm-outside-range? :src)])] [(mov-instruction :quadword src (reg-operand :r10))
                                                    (cmp-instruction :quadword (reg-operand :r10) dst)]
       [{:dst {:operand :imm}}] [(mov-instruction assembly-type dst (reg-operand :r11))
-                                (mov-instruction assembly-type src (reg-operand :r11))]
+                                (cmp-instruction assembly-type src (reg-operand :r11))]
       :else instruction)))
 
 (comment
@@ -635,7 +623,7 @@
 (defn- fix-push-instruction [instruction]
   (let [operand (:operand instruction)
         imm-outside-range? (and (= :imm (:operand operand))
-                                (util/in-int-range? (:value operand)))]
+                                (not (util/in-int-range? (:value operand))))]
     (if imm-outside-range?
       [(mov-instruction :quadword operand (reg-operand :r10))
        (push-instruction (reg-operand :r10))]
@@ -656,6 +644,12 @@
 (defn- fix-instruction [instruction _identifier->asm-entry]
   (let [f (or ((:op instruction) fix-instruction-map) #'identity)]
     (f instruction)))
+
+(comment
+  (fix-instruction {:op :cmp
+                    :assembly-type :longword
+                    :src {:operand :imm :value 0}
+                    :dst {:operand :imm :value 5}} {}))
 
 (defn- add-allocate-stack-instruction
   "Adds allocate stack instruction at the start of the function.
@@ -689,7 +683,7 @@
                                                                [(mov-instruction
                                                                  (source-type->assembly-type param-type)
                                                                  (stack-operand (+ 16 (* 8 idx)))
-                                                                 (pseudo-operand (:identifier param)))])
+                                                                 (pseudo-operand param))])
                                                          (range)
                                                          [stack-params
                                                           stack-param-types]))]
@@ -710,9 +704,9 @@
      :instructions (vec (flatten [parameter-instructions body-instructions]))}))
 
 (defn fix-assembly-function
-  "Fixes assembly instructions.
+  "Fixes assembly functions.
 
-  Replaces pseudoregisters, fix instruction"
+  Replaces pseudoregisters, fix instruction."
   [assembly-f identifier->asm-entry]
   (let [instructions (:instructions assembly-f)]
     (assoc assembly-f
@@ -752,11 +746,13 @@
         assembly-functions (->> tacky-program
                                 (filterv #(= :function (:declaration-type %)))
                                 (mapv #(tacky-function->assembly-function % ident->symbol)))
+        _ (prn assembly-functions)
         backend-symbol-table (backend-symbol-table ident->symbol)
         fixed-assembly-functions (mapv #(fix-assembly-function % backend-symbol-table) assembly-functions)
         program (vec (flatten [assembly-static-variables fixed-assembly-functions]))
-        _ (m/coerce schema/AssemblyProgram program)
-        _ (m/coerce schema/BackendSymbolMap backend-symbol-table)]
+        ; _ (m/coerce schema/AssemblyProgram program)
+        ; _ (m/coerce schema/BackendSymbolMap backend-symbol-table)
+        ]
     {:program program
      :backend-symbol-table backend-symbol-table}))
 
@@ -774,14 +770,16 @@
 
   (def input (slurp file-path))
 
-  (assembly-from-src input)
+  input
 
-  (pretty/explain
-   schema/BackendSymbolMap
-   (:backend-symbol-table (assembly-from-src input)))
+  (assembly-from-src input)
 
   (pretty/explain
    schema/AssemblyProgram
    (:program (assembly-from-src input)))
+
+  (pretty/explain
+   schema/BackendSymbolMap
+   (:backend-symbol-table (assembly-from-src input)))
 
   ())

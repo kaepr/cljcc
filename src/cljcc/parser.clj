@@ -492,6 +492,14 @@
 
 (comment
 
+  (def file-path "./test-programs/example.c")
+
+  (slurp "./test-programs/example.c")
+
+  (-> file-path
+      slurp
+      parse-from-src)
+
   (pretty/explain
    s/Program
    (parse-from-src

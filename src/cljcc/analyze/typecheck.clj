@@ -212,7 +212,7 @@
           {t-then :statement
            m :ident->symbol} (typecheck-statement return-type then-statement m)
           {t-else :statement
-           m :ident->symbol} (typecheck-statement return-type then-statement m)]
+           m :ident->symbol} (typecheck-statement return-type else-statement m)]
       {:statement (p/if-statement-node t-condition t-then t-else)
        :ident->symbol m})
     (let [t-condition (typecheck-exp condition m)

@@ -114,5 +114,3 @@
   [v]
   (and (>= v Integer/MIN_VALUE)
        (<= v Integer/MAX_VALUE)))
-
-(not (in-int-range? Long/MAX_VALUE))

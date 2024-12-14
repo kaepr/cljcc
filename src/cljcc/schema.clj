@@ -517,7 +517,7 @@
 (def AssemblyJmpCCInstruction
   [:map
    [:op [:= :jmpcc]]
-   [:operand #'AssemblyOperand]
+   [:cond-code #'CondCode]
    [:identifier string?]])
 
 (def AssemblyJmpInstruction

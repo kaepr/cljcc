@@ -2,7 +2,8 @@
   (:require
    [cljcc.util :refer [get-os]]
    [cljcc.compiler :as c]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [cljcc.exception :as exc]))
 
 (defn- handle-label [identifier]
   (condp = (get-os)
@@ -15,11 +16,10 @@
     (str "_" name)
     name))
 
-(defn- handle-current-translation-unit [name]
+(defn- handle-current-translation-unit [name ident->asm-entry]
   (if (= :mac (get-os))
     (handle-symbol-name name)
-    (if (;check if sym exists inside symbol map
-         )
+    (if (get-in ident->asm-entry [name :defined?])
       name
       (str name "@PLT"))))
 
@@ -72,10 +72,15 @@
                                        :1-byte "%r11b"}
 
                                  :cl {:4-byte "%cl"
-                                      :1-byte "%cl"}}]
+                                      :1-byte "%cl"}
+
+                                 :sp {:8-byte "%rsp"
+                                      :4-byte "%rsp"
+                                      :1-byte "%rsp"}}]
     (if-let [out (get-in register->width->output [register register-width])]
       out
-      (throw (AssertionError. (str "Invalid register operand register width " operand " " register-width))))))
+      (exc/emit-error "Invalid register and width" {:operand operand
+                                                    :opts register-width}))))
 
 (def operand-emitters
   "Map of assembly operands to operand emitters."
@@ -94,15 +99,36 @@
 
 ;;;; Instruction Emit
 
+(defn- assembly-type->instruction-suffix [atype]
+  (condp = atype
+    :longword "l"
+    :quadword "q"))
+
+(defn- assembly-type->operand-size [atype]
+  (condp = atype
+    :longword :4-byte
+    :quadword :8-byte))
+
 (defn- mov-instruction-emit [instruction]
-  (let [src (operand-emit (:src instruction))
-        dst (operand-emit (:dst instruction))]
-    [(format "    %s        %s, %s" "movl" src dst)]))
+  (let [atype (:assembly-type instruction)
+        opts {:register-width (assembly-type->operand-size atype)}
+        src (operand-emit (:src instruction) opts)
+        dst (operand-emit (:dst instruction) opts)
+        suffix (assembly-type->instruction-suffix atype)]
+    [(format "    %s%s        %s, %s" "mov" suffix src dst)]))
+
+(defn- movsx-instruction-emit [instruction]
+  (let [src (operand-emit (:src instruction) {:register-width :4-byte})
+        dst (operand-emit (:dst instruction) {:register-width :8-byte})]
+    [(format "    %s        %s, %s" "movslq" src dst)]))
 
 (defn- cmp-instruction-emit [instruction]
-  (let [src (operand-emit (:src instruction))
-        dst (operand-emit (:dst instruction))]
-    [(format "    %s       %s, %s" "cmpl" src dst)]))
+  (let [atype (:assembly-type instruction)
+        opts {:register-width (assembly-type->operand-size atype)}
+        src (operand-emit (:src instruction) opts)
+        dst (operand-emit (:dst instruction) opts)
+        suffix (assembly-type->instruction-suffix atype)]
+    [(format "    %s%s        %s, %s" "cmp" suffix src dst)]))
 
 (defn- jmp-instruction-emit [instruction]
   [(format "    jmp        %s" (handle-label (:identifier instruction)))])
@@ -110,7 +136,7 @@
 (defn- jmpcc-instruction-emit [instruction]
   (let [cc (name (:cond-code instruction))
         label (handle-label (:identifier instruction))]
-    [(format "    j%s        %s" cc label)]))
+    [(format "    j%s         %s" cc label)]))
 
 (defn- setcc-instruction-emit [instruction]
   (let [cc (name (:cond-code instruction))
@@ -126,50 +152,58 @@
    "    ret"])
 
 (defn- unary-instruction-emit [instruction]
-  (let [operand (operand-emit (:operand instruction))
+  (let [atype (:assembly-type instruction)
+        opts {:register-width (assembly-type->operand-size atype)}
+        operand (operand-emit (:operand instruction) opts)
+        suffix (assembly-type->instruction-suffix (:assembly-type instruction))
         assembly-operator (condp = (:unary-operator instruction)
-                            :bit-not "notl"
-                            :negate "negl"
+                            :bit-not "not"
+                            :negate "neg"
                             (throw (AssertionError. (str "Invalid unary operator: " instruction))))]
-    [(format "    %s        %s" assembly-operator operand)]))
+    [(format "    %s%s        %s" assembly-operator suffix operand)]))
 
 (defn- binary-instruction-emit [instruction]
-  (let [src (operand-emit (:src instruction))
-        dst (operand-emit (:dst instruction))
+  (let [atype (:assembly-type instruction)
+        opts {:register-width (assembly-type->operand-size atype)}
+        src (operand-emit (:src instruction) opts)
+        dst (operand-emit (:dst instruction) opts)
+        suffix (assembly-type->instruction-suffix (:assembly-type instruction))
         binop (:binary-operator instruction)
         binop-operator (condp = binop
-                         :add "addl"
-                         :sub "subl"
-                         :mul "imull"
-                         :bit-and "andl"
-                         :bit-xor "xorl"
-                         :bit-or "orl"
-                         :bit-left-shift "sall"
-                         :bit-right-shift "sarl"
+                         :add "add"
+                         :sub "sub"
+                         :mul "imul"
+                         :bit-and "and"
+                         :bit-xor "xor"
+                         :bit-or "or"
+                         :bit-left-shift "sal"
+                         :bit-right-shift "sar"
                          (throw (AssertionError. (str "Invalid binary operator: " instruction))))]
-    [(format "    %s        %s, %s" binop-operator src dst)]))
+    [(format "    %s%s        %s, %s" binop-operator suffix src dst)]))
 
-(defn- cdq-instruction-emit [_instruction]
-  ["    cdq"])
+(defn- cdq-instruction-emit [{:keys [assembly-type] :as _instruction}]
+  (let [opcode (if (= :longword assembly-type)
+                 "cdq"
+                 "cqo")]
+    [(format "    %s" opcode)]))
 
 (defn- idiv-instruction-emit [instruction]
-  [(format "    idivl       %s" (operand-emit (:operand instruction)))])
-
-(defn- allocate-stack-instruction-emit [instruction]
-  [(format "    subq        $%d, %%rsp" (:value instruction))])
-
-(defn- deallocate-stack-instruction-emit [instruction]
-  [(format "    addq        $%d, %%rsp" (:value instruction))])
+  (let [atype (:assembly-type instruction)
+        opts {:register-width (assembly-type->operand-size atype)}
+        op (operand-emit (:operand instruction) opts)
+        suffix (assembly-type->instruction-suffix (:assembly-type instruction))]
+    [(format "    idiv%s       %s" suffix op)]))
 
 (defn- push-instruction-emit [instruction]
   [(format "    pushq       %s" (operand-emit (:operand instruction) {:register-width :8-byte}))])
 
-(defn- call-instruction-emit [instruction]
-  [(format "    call        %s" (handle-current-translation-unit (:identifier instruction)))])
+(defn- call-instruction-emit [instruction m]
+  [(format "    call        %s" (handle-current-translation-unit (:identifier instruction) m))])
 
 (def instruction-emitters
   "Map of assembly instructions to function emitters."
   {:mov #'mov-instruction-emit
+   :movsx #'movsx-instruction-emit
    :ret #'ret-instruction-emit
    :binary #'binary-instruction-emit
    :cdq #'cdq-instruction-emit
@@ -180,23 +214,23 @@
    :jmpcc #'jmpcc-instruction-emit
    :label #'label-instruction-emit
    :cmp #'cmp-instruction-emit
-   :allocate-stack #'allocate-stack-instruction-emit
-   :deallocate-stack #'deallocate-stack-instruction-emit
    :push #'push-instruction-emit
    :call #'call-instruction-emit})
 
-(defn instruction-emit [instruction]
-  (if-let [[_ instruction-emit-fn] (find instruction-emitters (:op instruction))]
-    (instruction-emit-fn instruction)
+(defn instruction-emit [instruction ident->asm-entry]
+  (if-let [[op-type instruction-emit-fn] (find instruction-emitters (:op instruction))]
+    (if (= :call op-type)
+      (instruction-emit-fn instruction ident->asm-entry)
+      (instruction-emit-fn instruction))
     (throw (AssertionError. (str "Invalid instruction: " instruction)))))
 
-(defn function-definition-emit [{:keys [identifier instructions global?]}]
+(defn function-definition-emit [{:keys [identifier instructions global?]} ident->asm-entry]
   (let [name (handle-symbol-name identifier)
         globl (if global?
                 (format "    .globl %s", name)
                 "")
         name-line (format "%s:" name)
-        instructions (mapv instruction-emit instructions)]
+        instructions (mapv #(instruction-emit % ident->asm-entry) instructions)]
     (->> [globl
           "    .text"
           name-line
@@ -207,22 +241,28 @@
          flatten
          (filterv not-empty))))
 
-(defn- static-variable-definition-emit [{:keys [identifier global? initial-value]}]
+(defn- static-variable-definition-emit [{:keys [identifier global? alignment initial]} _ident->asm-entry]
   (let [name (handle-symbol-name identifier)
+        value-type (:type (:static-init initial))
+        value (:value (:static-init initial))
         globl (if global?
                 (format "    .globl %s" name)
                 "")
-        data-or-bss (if (zero? initial-value)
+        data-or-bss (if (zero? value)
                       "    .bss"
                       "    .data")
-        size-val (if (zero? initial-value)
-                   "    .zero 4"
-                   (format "    .long %d" initial-value))]
+        initializer-directive (condp = value-type
+                                :int-init (if (zero? value)
+                                            "    .zero 4"
+                                            (format "    .long %d" value))
+                                :long-init (if (zero? value)
+                                             "    .zero 8"
+                                             (format "    .quad %d" value)))]
     (filterv not-empty [globl
                         data-or-bss
-                        "    .balign 4"
+                        (format "    .balign %d" alignment)
                         (format "%s:" name)
-                        size-val
+                        initializer-directive
                         "\n"])))
 
 (def emitters-top-level
@@ -230,20 +270,20 @@
   {:function #'function-definition-emit
    :static-variable #'static-variable-definition-emit})
 
-(defn emit-top-level [tacky-ast]
-  (if-let [[_ emit-fn] (find emitters-top-level (:type tacky-ast))]
-    (emit-fn tacky-ast)
-    (throw (AssertionError. (str "Invalid ast: " tacky-ast)))))
+(defn emit-top-level [ast ident->asm-entry]
+  (if-let [[_ emit-fn] (find emitters-top-level (:op ast))]
+    (emit-fn ast ident->asm-entry)
+    (exc/emit-error "Invalid ast." ast)))
 
-(def linux-assembly-end ".section .note.GNU-stack,\"\",@progbits")
+(def linux-assembly-end ".section .note.GNU-stack,\"\",@progbits\n")
 
-(defn emit [top-levels]
+(defn emit [{:keys [program backend-symbol-table]}]
   (let [handle-os (fn [ast]
                     (if (= :linux (get-os))
-                      (conj (conj (vec ast) linux-assembly-end))
+                      (conj (conj (conj (vec ast) linux-assembly-end) "\n"))
                       ast))]
-    (->> top-levels
-         (mapv emit-top-level)
+    (->> program
+         (mapv #(emit-top-level % backend-symbol-table))
          concat
          flatten
          handle-os
@@ -251,10 +291,25 @@
 
 (comment
 
-  (emit
-   (c/generate-assembly
-    "int main(void) {
-     return ~(-(~(-1)));
-    }"))
+  (def file-path "./test-programs/example.c")
+
+  (slurp "./test-programs/example.c")
+
+  (-> file-path
+      slurp
+      c/assembly-from-src)
+
+  (str/split-lines
+   (-> file-path
+       slurp
+       c/assembly-from-src
+       emit))
+
+  (spit
+   "./test-programs/example.s"
+   (-> file-path
+       slurp
+       c/assembly-from-src
+       emit))
 
   ())

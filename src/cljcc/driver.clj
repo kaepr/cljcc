@@ -40,8 +40,10 @@
         preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
         file (io/file preprocessed-file-path)
         source (slurp file)
-        assembly-ast (c/assembly source)
+        assembly-ast (c/assembly-from-src source)
+        _ (log/info (str "Generated assembly output: " (with-out-str (pp/pprint assembly-ast))))
         assembly-output (e/emit assembly-ast)
+        _ (log/info (str "Generated ASM output: " (with-out-str (pp/pprint assembly-output))))
         assembly-out-file-path (make-file-name directory (remove-extension filename) "s")
         _ (println assembly-output)
         _ (spit assembly-out-file-path assembly-output)
@@ -92,7 +94,7 @@
   (let [preprocessed-file-path (make-file-name directory (remove-extension filename) "i")
         file (io/file preprocessed-file-path)
         source (slurp file)
-        assembly-ast (c/assembly source)]
+        assembly-ast (c/assembly-from-src source)]
     (log/info (str "Succesfully generated assembly ast.\n" assembly-ast))))
 
 (defn- cleanup-step [directory filename]
@@ -134,4 +136,6 @@
 
 (comment
 
-  (run "./test-programs/ex1.c" {}))
+  (run "./test-programs/ex1.c" {})
+
+  ())
