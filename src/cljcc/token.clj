@@ -53,7 +53,9 @@
     :kw-return
     :kw-int
     :kw-long
-    :kw-void})
+    :kw-void
+    :kw-signed
+    :kw-unsigned})
 
 (def unary-ops
   #{:logical-not
@@ -201,6 +203,8 @@
     "continue" :kw-continue
     "static" :kw-static
     "extern" :kw-extern
+    "signed" :kw-signed
+    "unsigned" :kw-unsigned
     :identifier))
 
 (defn create

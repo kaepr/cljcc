@@ -70,8 +70,8 @@
   (lex
    "
 int main() {
-    long a = 110;
+    long unsigned a = 110lu;
 }
 ")
 
- ())
+  ())

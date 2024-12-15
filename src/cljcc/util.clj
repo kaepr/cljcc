@@ -91,13 +91,19 @@
     (catch Exception _e
       false)))
 
+(defn- matches-regex [re s]
+  (not (nil? (re-matches re s))))
+
 (defn read-number
-  "Returns number and number type tuple.
+  "Returns number in string form.
 
   Checks whether number is valid long. If no, checks if it valid int.
   Otherwise error."
   [s line col]
-  (if-let [s (valid-long? s)]
+  (if-let [_ (or (matches-regex #"[0-9]+" s)
+                 (matches-regex #"[0-9]+[lL]" s)
+                 (matches-regex #"[0-9]+[uU]" s)
+                 (matches-regex #"[0-9]+([lL][uU]|[uU][lL])" s))]
     s
     (exc/lex-error {:line line
                     :col col})))
