@@ -33,6 +33,14 @@
   {:type :int-init
    :value v})
 
+(defn uint-init [v]
+  {:type :uint-init
+   :value v})
+
 (defn long-init [v]
   {:type :long-init
+   :value v})
+
+(defn ulong-init [v]
+  {:type :ulong-init
    :value v})

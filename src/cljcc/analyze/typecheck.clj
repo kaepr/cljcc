@@ -28,7 +28,10 @@
   [{:keys [value] :as e} _]
   (condp = (:type value)
     :int (set-type e {:type :int})
-    :long (set-type e {:type :long})))
+    :long (set-type e {:type :long})
+    :uint (set-type e {:type :uint})
+    :ulong (set-type e {:type :ulong})
+    (exc/analyzer-error "Invalid type for constant expression." {:e e})))
 
 (defmethod typecheck-exp :variable-exp
   [{:keys [identifier] :as e} ident->symbol]
@@ -51,10 +54,32 @@
       :logical-not (set-type unary-exp {:type :int})
       (set-type unary-exp (get-type typed-inner-e)))))
 
+(defn- get-type-size [t]
+  (condp = t
+    {:type :int} 5
+    {:type :uint} 5
+    {:type :long} 10
+    {:type :ulong} 10
+    (exc/analyzer-error "Invalid type passed to get-type-size." {:type t})))
+
+(defn type-signed? [t]
+  (condp = t
+    {:type :int} true
+    {:type :long} true
+    {:type :uint} false
+    {:type :ulong} false
+    (exc/analyzer-error "Invalid type passed to type-signed?." {:type t})))
+
 (defn- get-common-type [t1 t2]
-  (if (= t1 t2)
-    t1
-    {:type :long}))
+  (cond
+    (= t1 t2) t1
+    (= (get-type-size t1)
+       (get-type-size t2)) (if (type-signed? t1)
+                             t2
+                             t1)
+    (> (get-type-size t1)
+       (get-type-size t2)) t1
+    :else t2))
 
 (defn- convert-to-exp
   "Returns expression, using casting if necessary."
@@ -256,23 +281,49 @@
                        (sym/tentative-iv))
       :else (exc/analyzer-error "Non-constant initializer." declaration))))
 
-(defn- const-convert [{ttype :type :as _target-type} {const-type :type value :value :as const}]
-  (cond
-    (and (= ttype :int) (= const-type :long)) {:type :int
-                                               :value (-> value
-                                                          long
-                                                          unchecked-int)}
-    (and (= ttype :long) (= const-type :int)) {:type :long
-                                               :value (long value)}
-    :else const))
+(defn- const-convert
+  "Converts a constant to target type, performing conversion if necessary.
+
+   Value is already a long, which can hold any valid number."
+  [{ttype :type :as target-type} {const-type :type value :value :as const}]
+  (let []
+    (if (= ttype const-type)
+      const
+      (condp = ttype
+        :int {:type :int
+              :value (-> value
+                         unchecked-int
+                         long)}
+        :long {:type :long
+               :value value}
+        :uint {:type :uint
+               :value (-> value
+                          unchecked-int
+                          long)}
+        :ulong {:type :ulong
+                :value value}
+        (exc/analyzer-error "Invalid type passed to const-convert function." {:const const
+                                                                              :target-type target-type})))))
+
+(defn- zero-initializer
+  "Returns zero const initializer based on passed type."
+  [{:keys [type] :as _t}]
+  (condp = type
+    :int (sym/int-init 0)
+    :uint (sym/uint-init 0)
+    :long (sym/long-init 0)
+    :ulong (sym/ulong-init 0)))
 
 (defn- to-static-init [{:keys [value exp-type] :as e} var-type]
   (cond
-    (= :constant-exp exp-type) (let [c-const (const-convert var-type value)]
-                                 (cond
-                                   (= :int (:type c-const)) (sym/initial-iv (sym/int-init (:value c-const)))
-                                   (= :long (:type c-const)) (sym/initial-iv (sym/long-init (:value c-const)))))
-    (nil? e) (sym/initial-iv (sym/int-init 0))
+    (= :constant-exp exp-type) (let [{const-type :type
+                                      const-value :value} (const-convert var-type value)]
+                                 (condp = const-type
+                                   :int (sym/initial-iv (sym/int-init const-value))
+                                   :long (sym/initial-iv (sym/long-init const-value))
+                                   :uint (sym/initial-iv (sym/uint-init const-value))
+                                   :ulong (sym/initial-iv (sym/ulong-init const-value))))
+    (nil? e) (sym/initial-iv (zero-initializer var-type))
     :else (exc/analyzer-error "Non-constant initializer on static variable." e)))
 
 (defn- validate-file-scope-variable-declaration

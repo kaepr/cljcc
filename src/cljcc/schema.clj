@@ -295,15 +295,25 @@
    [:type [:= :int-init]]
    [:value int?]])
 
+(def UIntInit
+  [:map
+   [:type [:= :uint-init]]
+   [:value int?]])
+
 (def LongInit
   [:map
    [:type [:= :long-init]]
    [:value int?]])
 
+(def ULongInit
+  [:map
+   [:type [:= :ulong-init]]
+   [:value int?]])
+
 (def Initial
   [:map
    [:type [:= :initial]]
-   [:static-init [:or IntInit LongInit]]])
+   [:static-init [:or IntInit LongInit UIntInit ULongInit]]])
 
 (def InitialValue
   [:or
@@ -335,6 +345,8 @@
   [:map
    [:ident->symbol #'SymbolMap]
    [:program #'Program]])
+
+;;;; Tacky Schema
 
 (def TackyVar
   [:map

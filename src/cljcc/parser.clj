@@ -519,7 +519,8 @@
 (defn- parse-program [tokens]
   (let [[declarations tokens] (parse-repeatedly tokens parse-declaration :eof)
         _ (expect :eof tokens)
-        _ (m/coerce #'s/Program declarations)]
+        ;_ (m/coerce #'s/Program declarations)
+        ]
     declarations))
 
 (defn parse [tokens]
