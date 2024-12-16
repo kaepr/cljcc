@@ -5,6 +5,7 @@
    [cljcc.parser :as p]
    [cljcc.exception :as exc]
    [cljcc.symbol :as sym]
+   [malli.core :as m]
    [malli.dev.pretty :as pretty]
    [cljcc.analyze.typecheck :as tc]
    [cljcc.analyze.core :as a]
@@ -118,6 +119,11 @@
    :src src
    :dst dst})
 
+(defn- zero-extend-instruction [src dst]
+  {:type :zero-extend
+   :src src
+   :dst dst})
+
 (defn- copy-instruction [src dst]
   {:type :copy
    :src src
@@ -187,15 +193,18 @@
     value
     (let [dst (variable "cast_")
           _ (add-var-to-symbol dst target-type symbols)
+          inner-type (tc/get-type typed-inner)
           {res :val
-           insts :instructions} value]
-      (if (= :long (:type target-type))
-        {:val dst
-         :instructions (flatten [insts
-                                 (sign-extend-instruction res dst)])}
-        {:val dst
-         :instructions (flatten [insts
-                                 (truncate-instruction res dst)])}))))
+           insts :instructions} value
+          cast-i (cond
+                   (= (u/get-type-size target-type)
+                      (u/get-type-size inner-type)) (copy-instruction res dst)
+                   (< (u/get-type-size target-type)
+                      (u/get-type-size inner-type)) (truncate-instruction res dst)
+                   (u/type-signed? inner-type) (sign-extend-instruction res dst)
+                   :else (zero-extend-instruction res dst))]
+      {:val dst
+       :instructions (flatten [insts cast-i])})))
 
 (defmethod exp-handler :unary-exp
   [exp symbols]
@@ -517,9 +526,8 @@
         symbols (atom ident->symbol)
         function-instructions (tacky-function-instructions ast symbols)
         program (vec (concat variable-instructions function-instructions))
-        ;_ (m/coerce s/TackyProgram program)
-        ;_ (m/coerce s/SymbolMap @symbols)
-        ]
+        _ (m/coerce s/TackyProgram program)
+        _ (m/coerce s/SymbolMap @symbols)]
     {:program program
      :ident->symbol @symbols}))
 

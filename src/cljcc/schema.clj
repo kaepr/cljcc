@@ -382,6 +382,12 @@
    [:src #'TackyVal]
    [:dst #'TackyVal]])
 
+(def TackyZeroExtend
+  [:map
+   [:type [:= :zero-extend]]
+   [:src #'TackyVal]
+   [:dst #'TackyVal]])
+
 (def TackyUnary
   [:map
    [:type [:= :unary]]
@@ -437,6 +443,7 @@
    [:return #'TackyReturn]
    [:sign-extend #'TackySignExtend]
    [:truncate #'TackyTruncate]
+   [:zero-extend #'TackyZeroExtend]
    [:unary #'TackyUnary]
    [:binary #'TackyBinary]
    [:copy #'TackyCopy]

@@ -110,3 +110,19 @@
   [v]
   (and (>= v Integer/MIN_VALUE)
        (<= v Integer/MAX_VALUE)))
+
+(defn get-type-size [t]
+  (condp = t
+    {:type :int} 5
+    {:type :uint} 5
+    {:type :long} 10
+    {:type :ulong} 10
+    (exc/analyzer-error "Invalid type passed to get-type-size." {:type t})))
+
+(defn type-signed? [t]
+  (condp = t
+    {:type :int} true
+    {:type :long} true
+    {:type :uint} false
+    {:type :ulong} false
+    (exc/analyzer-error "Invalid type passed to type-signed?." {:type t})))

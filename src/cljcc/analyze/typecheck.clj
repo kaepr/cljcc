@@ -7,7 +7,8 @@
             [cljcc.symbol :as sym]
             [cljcc.analyze.resolve :as r]
             [cljcc.analyze.label-loops :as l]
-            [cljcc.exception :as exc]))
+            [cljcc.exception :as exc]
+            [cljcc.util :as u]))
 
 (declare typecheck-block typecheck-declaration to-static-init)
 
@@ -54,31 +55,15 @@
       :logical-not (set-type unary-exp {:type :int})
       (set-type unary-exp (get-type typed-inner-e)))))
 
-(defn- get-type-size [t]
-  (condp = t
-    {:type :int} 5
-    {:type :uint} 5
-    {:type :long} 10
-    {:type :ulong} 10
-    (exc/analyzer-error "Invalid type passed to get-type-size." {:type t})))
-
-(defn type-signed? [t]
-  (condp = t
-    {:type :int} true
-    {:type :long} true
-    {:type :uint} false
-    {:type :ulong} false
-    (exc/analyzer-error "Invalid type passed to type-signed?." {:type t})))
-
 (defn- get-common-type [t1 t2]
   (cond
     (= t1 t2) t1
-    (= (get-type-size t1)
-       (get-type-size t2)) (if (type-signed? t1)
-                             t2
-                             t1)
-    (> (get-type-size t1)
-       (get-type-size t2)) t1
+    (= (u/get-type-size t1)
+       (u/get-type-size t2)) (if (u/type-signed? t1)
+                               t2
+                               t1)
+    (> (u/get-type-size t1)
+       (u/get-type-size t2)) t1
     :else t2))
 
 (defn- convert-to-exp
