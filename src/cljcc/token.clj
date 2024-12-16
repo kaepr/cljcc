@@ -207,6 +207,12 @@
     "unsigned" :kw-unsigned
     :identifier))
 
+(def type-specifier-keywords
+  #{:kw-int :kw-long :kw-signed :kw-unsigned})
+
+(def storage-specifier-keywords
+  #{:kw-static :kw-extern})
+
 (defn create
   ([kind line col]
    {:kind kind

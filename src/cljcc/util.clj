@@ -6,6 +6,8 @@
 
 (def ^:private counter "Global integer counter for generating unique identifier names." (atom 0))
 
+(set! *warn-on-reflection* true)
+
 (defn create-identifier!
   "Returns a unique identifier. Used for generating unique identifier.
 
@@ -74,25 +76,13 @@
 (defn whitespace? [^Character ch]
   (Character/isWhitespace ch))
 
-(defn- valid-long?
-  "Validates string to be of form [0-9]+[lL]\b.
-
-  Verifies that `l` or `L` occurs only once, and at the end."
-  [s]
-  (try
-    (let [strip-l-or-L (if-let [_ (or (str/ends-with? s "l")
-                                      (str/ends-with? s "L"))]
-                         (subs s 0 (dec (count s)))
-                         s)
-          _ (-> strip-l-or-L
-                Long/parseLong
-                Long/toString)]
-      s)
-    (catch Exception _e
-      false)))
-
-(defn- matches-regex [re s]
+(defn matches-regex [re s]
   (not (nil? (re-matches re s))))
+
+(def unsigned-long-re #"[0-9]+([lL][uU]|[uU][lL])")
+(def signed-long-re #"[0-9]+[lL]")
+(def unsigned-int-re #"[0-9]+[uU]")
+(def signed-int-re #"[0-9]+")
 
 (defn read-number
   "Returns number in string form.
@@ -100,10 +90,10 @@
   Checks whether number is valid long. If no, checks if it valid int.
   Otherwise error."
   [s line col]
-  (if-let [_ (or (matches-regex #"[0-9]+" s)
-                 (matches-regex #"[0-9]+[lL]" s)
-                 (matches-regex #"[0-9]+[uU]" s)
-                 (matches-regex #"[0-9]+([lL][uU]|[uU][lL])" s))]
+  (if-let [_ (or (matches-regex signed-int-re s)
+                 (matches-regex signed-long-re s)
+                 (matches-regex unsigned-int-re s)
+                 (matches-regex unsigned-long-re s))]
     s
     (exc/lex-error {:line line
                     :col col})))

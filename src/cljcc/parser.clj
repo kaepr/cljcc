@@ -3,13 +3,18 @@
    [cljcc.lexer :as l]
    [cljcc.token :as t]
    [malli.core :as m]
+   [clojure.set :refer [union]]
    [malli.dev.pretty :as pretty]
-   [clojure.math :refer [pow]]
    [cljcc.schema :as s]
    [cljcc.exception :as exc]
-   [clojure.string :as str]))
+   [cljcc.util :as u]))
 
 (declare parse parse-exp parse-statement parse-block expect parse-declaration parse-variable-declaration)
+
+(set! *warn-on-reflection* true)
+
+(def valid-declaration-starts
+  (union t/type-specifier-keywords t/storage-specifier-keywords))
 
 (defn- parse-repeatedly
   "Repeatedly runs given parse function on input until end-kind encountered.
@@ -98,12 +103,25 @@
    :right r})
 
 (defn- parse-type [specifiers]
-  (condp = (mapv :specifier-type specifiers)
-    [:int] :int
-    [:long] :long
-    [:int :long] :long
-    [:long :int] :long
-    (exc/parser-error "Invalid specifiers" specifiers)))
+  (let [specifiers (mapv :specifier-type specifiers)
+        has-duplicates? (fn [coll] (some (fn [[_ c]] (> c 1)) (frequencies coll)))
+        spec-set (set specifiers)]
+    (cond
+      (has-duplicates? specifiers) (exc/parser-error "Invalid specifiers" {:specifiers specifiers})
+      (empty? specifiers) (exc/parser-error "Invalid specifiers" {:specifiers specifiers})
+      (and (spec-set :signed)
+           (spec-set :unsigned)) (exc/parser-error "Invalid specifiers" {:specifiers specifiers})
+      (and (spec-set :unsigned)
+           (spec-set :long)) :ulong
+      (spec-set :unsigned) :uint
+      (spec-set :long) :long
+      :else :int)))
+
+(comment
+
+  (parse-type '(:long :int :int :signed :unsigned))
+
+  ())
 
 (defn specifier-node [{:keys [kind] :as token}]
   (let [specifier-type (condp = kind
@@ -111,17 +129,19 @@
                          :kw-long :long
                          :kw-static :static
                          :kw-extern :extern
+                         :kw-unsigned :unsigned
+                         :kw-signed :signed
                          (exc/parser-error "Parser Error. Invalid specifier." {:specifier-token token}))]
     {:type :specifier
      :specifier-type specifier-type}))
 
 (defn- parse-type-specifier [[{:keys [kind] :as token} & rst]]
-  (if-not (contains? #{:kw-int :kw-long} kind)
+  (if-not (t/type-specifier-keywords kind)
     (exc/parser-error "Invalid token for type specifier" {:token token})
     [(specifier-node token) rst]))
 
 (defn- parse-specifier [[{:keys [kind] :as token} & rst]]
-  (if-not (contains? #{:kw-int :kw-long :kw-static :kw-extern} kind)
+  (if-not (valid-declaration-starts kind)
     (exc/parser-error "Invalid token for specifier" {:token token})
     [(specifier-node token) rst]))
 
@@ -135,18 +155,39 @@
         [_ tokens] (expect :right-paren tokens)]
     [(into [e-node] (vec rest-arguments)) tokens]))
 
-(defn- parse-const
-  "Expects a stringified number."
-  [v]
-  (let [long? (or (= \l (last v))
-                  (= \L (last v)))
-        n (if long?
-            (Long/parseLong (str/join (subvec (vec v) 0 (dec (count v)))))
-            (Long/parseLong v))
-        int-range? (and (not long?)
-                        (<= n (- (long (pow 2 31)) 1)))]
-    {:type (if int-range? :int :long)
-     :value n}))
+(defn- parse-signed-const [v]
+  (let [n (re-find #"[0-9]+" v)
+        long? (u/matches-regex u/signed-long-re v)
+        in-long-range? (try (Long/parseLong n) (catch Exception _e false))
+        in-int-range? (<= (Long/parseLong n) Integer/MAX_VALUE)
+        _ (when (not in-long-range?)
+            (exc/parser-error "Constant is too large to represent in int or long." {:number v}))]
+    (if (and (not long?) in-int-range?)
+      {:type :int
+       :value (Long/parseLong n)}
+      {:type :long
+       :value (Long/parseLong n)})))
+
+(defn- parse-unsigned-const [v]
+  (let [n (re-find #"[0-9]+" v)
+        ulong? (u/matches-regex u/unsigned-long-re v)
+        in-ulong-range? (try (Long/parseUnsignedLong n) (catch Exception _e false))
+        in-uint-range? (<= (Long/compareUnsigned (Long/parseUnsignedLong n) (Long/parseUnsignedLong "4294967295")) 0)
+        _ (when (not in-ulong-range?)
+            (exc/parser-error "Constant is too large to represent in unsigned int or unsigned long." {:number v}))]
+    (if (and (not ulong?) in-uint-range?)
+      {:type :uint
+       :value (Long/parseUnsignedLong n)}
+      {:type :ulong
+       :value (Long/parseUnsignedLong n)})))
+
+(defn- parse-const [^String v]
+  (cond
+    (or (u/matches-regex u/unsigned-long-re v)
+        (u/matches-regex u/unsigned-int-re v)) (parse-unsigned-const v)
+    (or (u/matches-regex u/signed-long-re v)
+        (u/matches-regex u/signed-int-re v)) (parse-signed-const v)
+    :else (exc/parser-error "Invalid constant." {:constant v})))
 
 (defn- parse-factor [[{kind :kind :as token} :as tokens]]
   (cond
@@ -155,7 +196,7 @@
                              [e rst] (parse-factor (rest tokens))]
                          [(unary-exp-node op e) rst])
     (= kind :left-paren) (let [next-token-kind (:kind (first (rest tokens)))
-                               type-specifier? (contains? #{:kw-int :kw-long} next-token-kind)]
+                               type-specifier? (t/type-specifier-keywords next-token-kind)]
                            (if type-specifier?
                              (let [[specifiers tokens] (parse-repeatedly (rest tokens) parse-type-specifier :right-paren)
                                    ptype (parse-type specifiers)
@@ -175,7 +216,7 @@
                                (let [[arguments tokens] (parse-argument-list tokens)]
                                  [(function-call-exp-node f-name arguments) tokens])))
                            [(variable-exp-node (:literal token)) (rest tokens)])
-    :else (throw (ex-info "Parser Error. Malformed token." {:token token}))))
+    :else (exc/parser-error "Invalid token to parse factor." {:token token})))
 
 (defn- parse-exp
   ([tokens]
@@ -316,7 +357,7 @@
     [(do-while-statement-node e s) tokens]))
 
 (defn- parse-for-init-statement [[{kind :kind} :as tokens]]
-  (if (contains? #{:kw-int :kw-static :kw-long :kw-extern} kind)
+  (if (valid-declaration-starts kind)
     (parse-declaration tokens)
     (parse-optional-expression tokens parse-exp :semicolon)))
 
@@ -447,7 +488,7 @@
       :else (throw (ex-info "Parser error. Not able  to parse variable declaration." {})))))
 
 (defn- parse-type-and-storage-class [specifiers]
-  (let [valid-types #{:int :long}
+  (let [valid-types #{:int :long :signed :unsigned}
         {types true, storage-classes false} (group-by #(contains? valid-types (:specifier-type %)) specifiers)
         type-specifier (parse-type types)
         storage-class (if (> (count storage-classes) 1)
@@ -465,7 +506,7 @@
       (parse-variable-declaration type-specifier storage-class tokens))))
 
 (defn- parse-block-item [[token :as tokens]]
-  (if (contains? #{:kw-int :kw-static :kw-extern :kw-long} (:kind token))
+  (if (valid-declaration-starts (:kind token))
     (parse-declaration tokens)
     (parse-statement tokens)))
 
@@ -477,7 +518,8 @@
 
 (defn- parse-program [tokens]
   (let [[declarations tokens] (parse-repeatedly tokens parse-declaration :eof)
-        _ (expect :eof tokens)]
+        _ (expect :eof tokens)
+        _ (m/coerce #'s/Program declarations)]
     declarations))
 
 (defn parse [tokens]
@@ -502,9 +544,8 @@
 
   (pretty/explain
    s/Program
-   (parse-from-src
-    "int main(void) {
-return (long) 42;
-}"))
+   (-> file-path
+       slurp
+       parse-from-src))
 
   ())

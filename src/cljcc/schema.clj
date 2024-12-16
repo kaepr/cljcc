@@ -9,9 +9,17 @@
   [:map
    [:type [:= :int]]])
 
+(def UIntType
+  [:map
+   [:type [:= :uint]]])
+
 (def LongType
   [:map
    [:type [:= :long]]])
+
+(def ULongType
+  [:map
+   [:type [:= :ulong]]])
 
 (def FunType
   [:map
@@ -22,16 +30,20 @@
 (def Type
   [:schema {:registry {::mtype-int #'IntType
                        ::mtype-long #'LongType
+                       ::mtype-uint #'UIntType
+                       ::mtype-ulong #'ULongType
                        ::mtype-function #'FunType}}
    [:multi {:dispatch :type}
     [:int #'IntType]
     [:long #'LongType]
+    [:uint #'UIntType]
+    [:ulong #'ULongType]
     [:function #'FunType]]])
 
 (def Const
   [:map
-   [:type [:enum :int :long]]
-   [:value int?]])
+   [:type [:enum :int :long :uint :ulong]]
+   [:value number?]])
 
 (def ConstantExp
   [:map

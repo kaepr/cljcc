@@ -2,12 +2,14 @@
  :deps {org.clojure/clojure {:mvn/version "1.11.1"}
         org.clojure/tools.cli {:mvn/version "1.1.230"}
         org.clojure/core.match {:mvn/version "1.1.0"}
+        io.github.humbleui/humbleui {:git/sha "03f30f8e832899b35e807f2e02efcdedfab5401d"}
         metosin/malli {:mvn/version "0.16.4"}
         com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}}
  :aliases
  {:run-m {:main-opts ["-m" "cljcc.cljcc"]}
   :build {:deps {io.github.clojure/tools.build
                  {:mvn/version "0.10.3"}}
+          :jvm-opts ["-Dclojure.compiler.direct-linking=true"]
           :ns-default build}
   :test {:extra-paths ["test"]
          :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}
