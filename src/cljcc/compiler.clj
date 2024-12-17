@@ -8,12 +8,11 @@
             [malli.core :as m]
             [malli.dev.pretty :as pretty]
             [cljcc.util :as util]
-            [cljcc.exception :as exc]
-            [clojure.string :as str]))
+            [cljcc.exception :as exc]))
 
 (def registers #{:ax :dx :di :si :r8 :r9 :r10 :r11 :cx :cl :sp})
 
-(def cond-codes #{:e :ne :g :ge :l :le})
+(def cond-codes #{:e :ne :g :ge :l :le :a :ae :b :be})
 
 ;;;; Instructions
 
@@ -25,6 +24,11 @@
 
 (defn- movsx-instruction [src dst]
   {:op :movsx
+   :src src
+   :dst dst})
+
+(defn- mov-zero-extend-instruction [src dst]
+  {:op :mov-zero-extend
    :src src
    :dst dst})
 
@@ -53,6 +57,11 @@
 
 (defn- idiv-instruction [assembly-type operand]
   {:op :idiv
+   :assembly-type assembly-type
+   :operand operand})
+
+(defn- div-instruction [assembly-type operand]
+  {:op :div
    :assembly-type assembly-type
    :operand operand})
 
@@ -117,7 +126,9 @@
 (defn- source-type->assembly-type [t]
   (condp = t
     {:type :int} :longword
+    {:type :uint} :longword
     {:type :long} :quadword
+    {:type :ulong} :quadword
     (exc/compiler-error "Invalid type for assembly type conversion." t)))
 
 (defn- assembly-type->size [assembly-type]
@@ -129,17 +140,29 @@
 (defn- source-type->alignment [t]
   (condp = t
     {:type :int} 4
+    {:type :uint} 4
     {:type :long} 8
+    {:type :ulong} 8
     (exc/compiler-error "Invalid type for alignment conversion." t)))
+
+(defn tacky-val->tacky->type
+  "Returns type for a tacky value in a given symbol map."
+  [{:keys [type value] :as tv} identifier->symbol]
+  (condp = type
+    :variable (get-in identifier->symbol [value :type])
+    :constant {:type (:type value)}
+    (exc/compiler-error "Invalid tacky value for getting tacky type conversion." tv)))
 
 (defn tacky-val->assembly-type
   "Returns assembly for a tacky value in a given symbol map."
-  [{:keys [type value] :as tv} identifier->symbol]
+  [{:keys [type] :as tv} identifier->symbol]
   (condp = type
-    :variable (source-type->assembly-type (get-in identifier->symbol [value :type]))
-    :constant (condp = (:type value)
+    :variable (source-type->assembly-type (tacky-val->tacky->type tv identifier->symbol))
+    :constant (condp = (:type (tacky-val->tacky->type tv identifier->symbol))
                 :int :longword
-                :long :quadword)
+                :uint :longword
+                :long :quadword
+                :ulong :quadword)
     (exc/compiler-error "Invalid tacky value for assembly type conversion." tv)))
 
 (defn- tacky-val->assembly-operand [{:keys [type value]}]
@@ -182,37 +205,79 @@
    :less-or-equal :le
    :greater-or-equal :ge})
 
+(defn- get-cond-code [op signed?]
+  (condp = op
+    :equal :e
+    :not-equal :ne
+    :greater-than (if signed? :g :a)
+    :greater-or-equal (if signed? :ge :ae)
+    :less-than (if signed? :l :b)
+    :less-or-equal (if signed? :le :be)))
+
+(defn- tacky-div-mod->assembly-instruction
+  [binop tacky-src1 tacky-src2 tacky-dst m]
+  (let [result-reg (if (= binop :div) (reg-operand :ax) (reg-operand :dx))
+        signed? (util/type-signed? (tacky-val->tacky->type tacky-src1 m))
+        src1-type (tacky-val->assembly-type tacky-src1 m)
+        src1 (tacky-val->assembly-operand tacky-src1)
+        src2 (tacky-val->assembly-operand tacky-src2)
+        dst (tacky-val->assembly-operand tacky-dst)]
+    (if signed?
+      [(mov-instruction src1-type src1 (reg-operand :ax))
+       (cdq-instruction src1-type)
+       (idiv-instruction src1-type src2)
+       (mov-instruction src1-type result-reg dst)]
+      [(mov-instruction src1-type src1 (reg-operand :ax))
+       (mov-instruction src1-type (imm-operand 0) (reg-operand :dx))
+       (div-instruction src1-type src2)
+       (mov-instruction src1-type result-reg dst)])))
+
+(defn- tacky-relational->assembly-instruction
+  [binop tacky-src1 tacky-src2 tacky-dst m]
+  (let [signed? (util/type-signed? (tacky-val->tacky->type tacky-src1 m))
+        cond-code (get-cond-code binop signed?)
+        src1-type (tacky-val->assembly-type tacky-src1 m)
+        dst-type (tacky-val->assembly-type tacky-dst m)
+        src1 (tacky-val->assembly-operand tacky-src1)
+        src2 (tacky-val->assembly-operand tacky-src2)
+        dst (tacky-val->assembly-operand tacky-dst)]
+    [(cmp-instruction src1-type src2 src1)
+     (mov-instruction dst-type (imm-operand 0) dst)
+     (setcc-instruction cond-code dst)]))
+
+(defn- tacky-bit-shift->assembly-instruction
+  [binop tacky-src1 tacky-src2 tacky-dst m]
+  (let [src1-type (tacky-val->assembly-type tacky-src1 m)
+        src1 (tacky-val->assembly-operand tacky-src1)
+        src2 (tacky-val->assembly-operand tacky-src2)
+        dst (tacky-val->assembly-operand tacky-dst)]
+    [(mov-instruction src1-type src1 dst)
+     (mov-instruction src1-type src2 (reg-operand :cx))
+     (binary-instruction binop src1-type (reg-operand :cl) dst)]))
+
+(defn- tacky-add-sub-mul->assembly-instruction
+  [binop tacky-src1 tacky-src2 tacky-dst m]
+  (let [src1-type (tacky-val->assembly-type tacky-src1 m)
+        src1 (tacky-val->assembly-operand tacky-src1)
+        src2 (tacky-val->assembly-operand tacky-src2)
+        dst (tacky-val->assembly-operand tacky-dst)]
+    [(mov-instruction src1-type src1 dst)
+     (binary-instruction binop src1-type src2 dst)]))
+
 (defmethod tacky-instruction->assembly-instructions :binary
   [{binop :binary-operator
     t-src1 :src1
     t-src2 :src2
     t-dst :dst} m]
-  (let [src1 (tacky-val->assembly-operand t-src1)
-        src2 (tacky-val->assembly-operand t-src2)
-        dst (tacky-val->assembly-operand t-dst)
-        src1-type (tacky-val->assembly-type t-src1 m)
-        dst-type (tacky-val->assembly-type t-dst m)
-        div? (= binop :div)
+  (let [div? (= binop :div)
         mod? (= binop :mod)
         relational? (contains? relational-ops binop)
         bit-shift? (contains? #{:bit-left-shift :bit-right-shift} binop)]
     (cond
-      div? [(mov-instruction src1-type src1 (reg-operand :ax))
-            (cdq-instruction src1-type)
-            (idiv-instruction src1-type src2)
-            (mov-instruction src1-type (reg-operand :ax) dst)]
-      mod? [(mov-instruction src1-type src1 (reg-operand :ax))
-            (cdq-instruction src1-type)
-            (idiv-instruction src1-type src2)
-            (mov-instruction src1-type (reg-operand :dx) dst)]
-      relational? [(cmp-instruction src1-type src2 src1)
-                   (mov-instruction dst-type (imm-operand 0) dst)
-                   (setcc-instruction (binop relational-ops) dst)]
-      bit-shift? [(mov-instruction src1-type src1 dst)
-                  (mov-instruction src1-type src2 (reg-operand :cx))
-                  (binary-instruction binop src1-type (reg-operand :cl) dst)]
-      :else [(mov-instruction src1-type src1 dst)
-             (binary-instruction binop src1-type src2 dst)])))
+      (or div? mod?) (tacky-div-mod->assembly-instruction binop t-src1 t-src2 t-dst m)
+      relational? (tacky-relational->assembly-instruction binop t-src1 t-src2 t-dst m)
+      bit-shift? (tacky-bit-shift->assembly-instruction binop t-src1 t-src2 t-dst m)
+      :else (tacky-add-sub-mul->assembly-instruction binop t-src1 t-src2 t-dst m))))
 
 (defmethod tacky-instruction->assembly-instructions :jump-if-zero
   [{cond-val :val
@@ -259,6 +324,13 @@
   (let [src (tacky-val->assembly-operand t-src)
         dst (tacky-val->assembly-operand t-dst)]
     [(mov-instruction :longword src dst)]))
+
+(defmethod tacky-instruction->assembly-instructions :zero-extend
+  [{t-src :src
+    t-dst :dst} _m]
+  (let [src (tacky-val->assembly-operand t-src)
+        dst (tacky-val->assembly-operand t-dst)]
+    [(mov-zero-extend-instruction src dst)]))
 
 (defn- pass-args-in-registers-instructions
   "Caller function stores the arguments in registers.
@@ -629,15 +701,27 @@
        (push-instruction (reg-operand :r10))]
       instruction)))
 
-(comment
+(defn- fix-div-instruction [instruction]
+  (let [assembly-type (:assembly-type instruction)]
+    (if (= :imm (get-in instruction [:operand :operand]))
+      [(mov-instruction assembly-type (:operand instruction) (reg-operand :r10))
+       (div-instruction assembly-type (reg-operand :r10))]
+      instruction)))
 
-  ())
+(defn- fix-mov-zero-extend-instruction [{:keys [src dst] :as _instruction}]
+  (let [dst-register? (= :reg (:operand dst))]
+    (if dst-register?
+      [(mov-instruction :longword src dst)]
+      [(mov-instruction :longword src (reg-operand :r11))
+       (mov-instruction :quadword (reg-operand :r11) dst)])))
 
 (def fix-instruction-map
   {:idiv #'fix-idiv-instruction
    :mov #'fix-mov-instruction
    :movsx #'fix-movsx-instruction
    :cmp #'fix-cmp-instruction
+   :div #'fix-div-instruction
+   :mov-zero-extend #'fix-mov-zero-extend-instruction
    :push #'fix-push-instruction
    :binary #'fix-binary-instruction})
 
@@ -746,12 +830,11 @@
         assembly-functions (->> tacky-program
                                 (filterv #(= :function (:declaration-type %)))
                                 (mapv #(tacky-function->assembly-function % ident->symbol)))
-        _ (prn assembly-functions)
         backend-symbol-table (backend-symbol-table ident->symbol)
         fixed-assembly-functions (mapv #(fix-assembly-function % backend-symbol-table) assembly-functions)
         program (vec (flatten [assembly-static-variables fixed-assembly-functions]))
-        ; _ (m/coerce schema/AssemblyProgram program)
-        ; _ (m/coerce schema/BackendSymbolMap backend-symbol-table)
+        ;_ (m/coerce schema/AssemblyProgram program)
+        ;_ (m/coerce schema/BackendSymbolMap backend-symbol-table)
         ]
     {:program program
      :backend-symbol-table backend-symbol-table}))

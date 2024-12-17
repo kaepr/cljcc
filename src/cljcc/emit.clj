@@ -194,6 +194,13 @@
         suffix (assembly-type->instruction-suffix (:assembly-type instruction))]
     [(format "    idiv%s       %s" suffix op)]))
 
+(defn- div-instruction-emit [instruction]
+  (let [atype (:assembly-type instruction)
+        opts {:register-width (assembly-type->operand-size atype)}
+        op (operand-emit (:operand instruction) opts)
+        suffix (assembly-type->instruction-suffix (:assembly-type instruction))]
+    [(format "     div%s       %s" suffix op)]))
+
 (defn- push-instruction-emit [instruction]
   [(format "    pushq       %s" (operand-emit (:operand instruction) {:register-width :8-byte}))])
 
@@ -208,6 +215,7 @@
    :binary #'binary-instruction-emit
    :cdq #'cdq-instruction-emit
    :idiv #'idiv-instruction-emit
+   :div #'div-instruction-emit
    :unary #'unary-instruction-emit
    :setcc #'setcc-instruction-emit
    :jmp #'jmp-instruction-emit
@@ -251,13 +259,15 @@
         data-or-bss (if (zero? value)
                       "    .bss"
                       "    .data")
-        initializer-directive (condp = value-type
-                                :int-init (if (zero? value)
-                                            "    .zero 4"
-                                            (format "    .long %d" value))
-                                :long-init (if (zero? value)
-                                             "    .zero 8"
-                                             (format "    .quad %d" value)))]
+        initializer-directive (cond
+                                (or (= :int-init value-type)
+                                    (= :uint-init value-type)) (if (zero? value)
+                                                                 "    .zero 4"
+                                                                 (format "    .long %d" value))
+                                (or (= :long-init value-type)
+                                    (= :ulong-init value-type)) (if (zero? value)
+                                                                  "    .zero 8"
+                                                                  (format "    .quad %d" value)))]
     (filterv not-empty [globl
                         data-or-bss
                         (format "    .balign %d" alignment)

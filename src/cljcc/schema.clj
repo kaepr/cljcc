@@ -483,7 +483,7 @@
 
 (def AssemblyType [:enum :longword :quadword])
 
-(def CondCode [:enum :e :ne :g :ge :l :le])
+(def CondCode [:enum :e :ne :g :ge :l :le :a :ae :b :be])
 
 (def Register [:enum :ax :dx :di :si :r8 :r9 :r10 :r11 :cx :cl :sp])
 
@@ -567,6 +567,12 @@
    [:assembly-type #'AssemblyType]
    [:operand #'AssemblyOperand]])
 
+(def AssemblyDivInstruction
+  [:map
+   [:op [:= :div]]
+   [:assembly-type #'AssemblyType]
+   [:operand #'AssemblyOperand]])
+
 (def AssemblyCmpInstruction
   [:map
    [:op [:= :cmp]]
@@ -602,14 +608,22 @@
    [:src #'AssemblyOperand]
    [:dst #'AssemblyOperand]])
 
+(def AssemblyMovZeroExtendInstruction
+  [:map
+   [:op [:= :mov-zero-extend]]
+   [:src #'AssemblyOperand]
+   [:dst #'AssemblyOperand]])
+
 (def AssemblyInstruction
   [:multi {:dispatch :op}
    [:mov #'AssemblyMovInstruction]
    [:movsx #'AssemblyMovsxInstruction]
+   [:mov-zero-extend #'AssemblyMovZeroExtendInstruction]
    [:unary #'AssemblyUnaryInstruction]
    [:binary #'AssemblyBinaryInstruction]
    [:cmp #'AssemblyCmpInstruction]
    [:idiv #'AssemblyIdivInstruction]
+   [:div #'AssemblyDivInstruction]
    [:cdq #'AssemblyCdqInstruction]
    [:jmp #'AssemblyJmpInstruction]
    [:jmpcc #'AssemblyJmpCCInstruction]
