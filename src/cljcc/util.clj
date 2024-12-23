@@ -83,6 +83,7 @@
 (def signed-long-re #"[0-9]+[lL]")
 (def unsigned-int-re #"[0-9]+[uU]")
 (def signed-int-re #"[0-9]+")
+(def fractional-constant #"([0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.")
 
 (defn read-number
   "Returns number in string form.

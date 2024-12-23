@@ -37,11 +37,15 @@
 (defn -main
   "Main entrypoint for cljcc compiler."
   [& args]
-  (let [{:keys [file-path exit-message ok? options]} (validate-args args)]
+  (let [{:keys [file-path exit-message ok? options]} (validate-args args)
+        libs (filterv (fn [v] (and
+                               (string? v)
+                               (re-matches #"-l.+" v)))
+                      args)]
     (if exit-message
       (exit (if ok? 0 1) exit-message)
       (try
-        (d/run file-path options)
+        (d/run file-path (assoc options :libs libs))
         (exit 0 "Successfully executed.")
         (catch Exception e
           (exit 1 (ex-message e) e))))))

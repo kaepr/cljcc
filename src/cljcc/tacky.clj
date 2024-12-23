@@ -526,8 +526,9 @@
         symbols (atom ident->symbol)
         function-instructions (tacky-function-instructions ast symbols)
         program (vec (concat variable-instructions function-instructions))
-        _ (m/coerce s/TackyProgram program)
-        _ (m/coerce s/SymbolMap @symbols)]
+        ;_ (m/coerce s/TackyProgram program)
+        ;_ (m/coerce s/SymbolMap @symbols)
+        ]
     {:program program
      :ident->symbol @symbols}))
 
@@ -630,6 +631,24 @@ int foo;
        a/validate
        tacky-generate
        :program))
+
+  (def x (-> file-path
+             slurp
+             p/parse-from-src
+             a/validate))
+
+  (pretty/explain
+   s/SymbolMap
+   (:ident->symbol (tacky-generate x)))
+
+  (pretty/explain
+   s/SymbolMap
+   (-> file-path
+       slurp
+       p/parse-from-src
+       a/validate
+       tacky-generate
+       :ident->symbol))
 
   (-> file-path
       slurp

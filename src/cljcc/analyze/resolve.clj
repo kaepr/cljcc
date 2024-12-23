@@ -56,7 +56,7 @@
                          (if (contains? ident->symbol fn-name)
                            (p/function-call-exp-node (:new-name (get ident->symbol fn-name))
                                                      (mapv #(resolve-exp % ident->symbol) args))
-                           (throw (ex-info "Undeclared function !" {:function-name fn-name}))))
+                           (exc/analyzer-error "Undeclared function." {:function-name fn-name})))
     (exc/analyzer-error "Invalid expression." {:exp e})))
 
 (defn- resolve-optional-exp [e ident->symbol]
@@ -166,7 +166,7 @@
   (condp = declaration-type
     :variable (resolve-variable-declaration d ident->symbol)
     :function (resolve-function-declaration d ident->symbol)
-    (throw (ex-info "Analyzer Error. Invalid declaration type." {:declaration d}))))
+    (exc/analyzer-error "Invalid declaration type" {:declaration d})))
 
 (defn- resolve-for-init [for-init ident->symbol]
   (if (= (:type for-init) :declaration)

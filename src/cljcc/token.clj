@@ -53,6 +53,7 @@
     :kw-return
     :kw-int
     :kw-long
+    :kw-double
     :kw-void
     :kw-signed
     :kw-unsigned})
@@ -194,6 +195,7 @@
     "void" :kw-void
     "int" :kw-int
     "long" :kw-long
+    "double" :kw-double
     "if" :kw-if
     "else" :kw-else
     "do" :kw-do
@@ -208,7 +210,7 @@
     :identifier))
 
 (def type-specifier-keywords
-  #{:kw-int :kw-long :kw-signed :kw-unsigned})
+  #{:kw-int :kw-long :kw-double :kw-signed :kw-unsigned})
 
 (def storage-specifier-keywords
   #{:kw-static :kw-extern})

@@ -43,8 +43,8 @@
   [kind [token & rst]]
   (if (= kind (:kind token))
     [token rst]
-    (throw (ex-info "Parser Error." {:expected kind
-                                     :actual (:kind token)}))))
+    (exc/parser-error "Actual and expected token differ." {:expected kind
+                                                           :actual (:kind token)})))
 
 (defn constant-exp-node [v]
   {:type :exp
@@ -519,7 +519,7 @@
 (defn- parse-program [tokens]
   (let [[declarations tokens] (parse-repeatedly tokens parse-declaration :eof)
         _ (expect :eof tokens)
-        ;_ (m/coerce #'s/Program declarations)
+                                        ;_ (m/coerce #'s/Program declarations)
         ]
     declarations))
 
