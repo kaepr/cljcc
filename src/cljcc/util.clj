@@ -45,9 +45,10 @@
 (defn handle-sh
   "Preprends arch -x86_64 if running under Mac M chips."
   [command & args]
-  (if (mac-aarch64?)
-    (apply sh "arch" "-x86_64" command args)
-    (apply sh command args)))
+  (let [args (filterv (comp not empty?) args)]
+    (if (mac-aarch64?)
+      (apply sh "arch" "-x86_64" command args)
+      (apply sh command args))))
 
 (defn exit
   ([status msg]
