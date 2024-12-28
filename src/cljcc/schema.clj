@@ -21,6 +21,10 @@
   [:map
    [:type [:= :ulong]]])
 
+(def DoubleType
+  [:map
+   [:type [:= :double]]])
+
 (def FunType
   [:map
    [:type [:= :function]]
@@ -32,12 +36,14 @@
                        ::mtype-long #'LongType
                        ::mtype-uint #'UIntType
                        ::mtype-ulong #'ULongType
+                       ::mtype-double #'DoubleType
                        ::mtype-function #'FunType}}
    [:multi {:dispatch :type}
     [:int #'IntType]
     [:long #'LongType]
     [:uint #'UIntType]
     [:ulong #'ULongType]
+    [:double #'DoubleType]
     [:function #'FunType]]])
 
 (def Const

@@ -68,6 +68,13 @@
   (or (= \_ ch)
       (Character/isLetterOrDigit ch)))
 
+(defn letter-digit-period? [^Character ch]
+  (or (= \_ ch)
+      (= \. ch)
+      (= \+ ch)
+      (= \- ch)
+      (Character/isLetterOrDigit ch)))
+
 (defn digit? [^Character ch]
   (Character/isDigit ch))
 
@@ -80,23 +87,31 @@
 (defn matches-regex [re s]
   (not (nil? (re-matches re s))))
 
-(def unsigned-long-re #"[0-9]+([lL][uU]|[uU][lL])")
-(def signed-long-re #"[0-9]+[lL]")
-(def unsigned-int-re #"[0-9]+[uU]")
-(def signed-int-re #"[0-9]+")
-(def fractional-constant #"([0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.")
+(def unsigned-long-re #"([0-9]+([lL][uU]|[uU][lL]))[^\w.]")
+(def signed-long-re #"([0-9]+[lL])[^\w.]")
+(def unsigned-int-re #"([0-9]+[uU])[^\w.]")
+(def signed-int-re #"([0-9]+)[^\w.]")
+(def floating-point-constant #"(([0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[^\w.]")
+
+(defn match-regex
+  "Returns matched string and remaining string tuple, otherwise returns nil.
+
+  The first match by re-finds must be the starting subsequence, otherwise false."
+  [re s]
+  (when-let [matched (second (re-find re s))]
+    (when (str/starts-with? s matched)
+      [matched (str/replace-first s matched "")])))
 
 (defn read-number
-  "Returns number in string form.
-
-  Checks whether number is valid long. If no, checks if it valid int.
-  Otherwise error."
+  "Returns tuple of matched number and remaining string, otherwise nil."
   [s line col]
-  (if-let [_ (or (matches-regex signed-int-re s)
-                 (matches-regex signed-long-re s)
-                 (matches-regex unsigned-int-re s)
-                 (matches-regex unsigned-long-re s))]
-    s
+  (if-let [x (or
+              (match-regex floating-point-constant s)
+              (match-regex signed-int-re s)
+              (match-regex signed-long-re s)
+              (match-regex unsigned-int-re s)
+              (match-regex unsigned-long-re s))]
+    x
     (exc/lex-error {:line line
                     :col col})))
 

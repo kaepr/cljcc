@@ -271,8 +271,8 @@
 
 ;; Program is list of block items, which are themselves just blocks.
 (defn resolve-program [program]
-  (let [res (:block (resolve-block program))
-        _ (m/coerce s/Program res)]
+  (let [res (:block (resolve-block program))]
+        ; _ (m/coerce s/Program res)]
     res))
 
 (comment
