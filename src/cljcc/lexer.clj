@@ -67,12 +67,31 @@
       slurp
       lex)
 
-  (lex "int x = 100;")
+  (lex "int x = 100l;")
+
+  (lex "
+    if (!sign_extend(10, 10l)) {
+        return 1;
+    }
+")
+
 
   (lex
    "
 int main(void) {
-    return 2- -1;
+    if (!sign_extend(10, 10l)) {
+        return 1;
+    }
+
+    if (!sign_extend(-10, -10l)) {
+        return 2;
+    }
+
+    long l = (long) 100;
+    if (l != 100l) {
+        return 3;
+    }
+    return 0;
 }
 ")
 

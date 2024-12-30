@@ -107,6 +107,8 @@
         has-duplicates? (fn [coll] (some (fn [[_ c]] (> c 1)) (frequencies coll)))
         spec-set (set specifiers)]
     (cond
+      (= specifiers [:double]) :double
+      (some #{:double} specifiers) (exc/parser-error "Cannot combine double with other specifiers." {:specifiers specifiers})
       (has-duplicates? specifiers) (exc/parser-error "Invalid specifiers" {:specifiers specifiers})
       (empty? specifiers) (exc/parser-error "Invalid specifiers" {:specifiers specifiers})
       (and (spec-set :signed)
@@ -117,16 +119,11 @@
       (spec-set :long) :long
       :else :int)))
 
-(comment
-
-  (parse-type '(:long :int :int :signed :unsigned))
-
-  ())
-
 (defn specifier-node [{:keys [kind] :as token}]
   (let [specifier-type (condp = kind
                          :kw-int :int
                          :kw-long :long
+                         :kw-double :double
                          :kw-static :static
                          :kw-extern :extern
                          :kw-unsigned :unsigned
@@ -157,7 +154,7 @@
 
 (defn- parse-signed-const [v]
   (let [n (re-find #"[0-9]+" v)
-        long? (u/matches-regex u/signed-long-re v)
+        long? (u/matches-regex u/signed-long-re-without-wordbreak v)
         in-long-range? (try (Long/parseLong n) (catch Exception _e false))
         in-int-range? (<= (Long/parseLong n) Integer/MAX_VALUE)
         _ (when (not in-long-range?)
@@ -170,7 +167,7 @@
 
 (defn- parse-unsigned-const [v]
   (let [n (re-find #"[0-9]+" v)
-        ulong? (u/matches-regex u/unsigned-long-re v)
+        ulong? (u/matches-regex u/unsigned-long-re-without-wordbreak v)
         in-ulong-range? (try (Long/parseUnsignedLong n) (catch Exception _e false))
         in-uint-range? (<= (Long/compareUnsigned (Long/parseUnsignedLong n) (Long/parseUnsignedLong "4294967295")) 0)
         _ (when (not in-ulong-range?)
@@ -181,12 +178,17 @@
       {:type :ulong
        :value (Long/parseUnsignedLong n)})))
 
+(defn- parse-double-num [v]
+  {:type :double
+   :value (Double/parseDouble v)})
+
 (defn- parse-const [^String v]
   (cond
-    (or (u/matches-regex u/unsigned-long-re v)
-        (u/matches-regex u/unsigned-int-re v)) (parse-unsigned-const v)
-    (or (u/matches-regex u/signed-long-re v)
-        (u/matches-regex u/signed-int-re v)) (parse-signed-const v)
+    (u/matches-regex u/floating-point-constant-without-wordbreak v) (parse-double-num v)
+    (or (u/matches-regex u/unsigned-long-re-without-wordbreak v)
+        (u/matches-regex u/unsigned-int-re-without-wordbreak v)) (parse-unsigned-const v)
+    (or (u/matches-regex u/signed-long-re-without-wordbreak v)
+        (u/matches-regex u/signed-int-re-without-wordbreak v)) (parse-signed-const v)
     :else (exc/parser-error "Invalid constant." {:constant v})))
 
 (defn- parse-factor [[{kind :kind :as token} :as tokens]]
@@ -488,7 +490,7 @@
       :else (throw (ex-info "Parser error. Not able  to parse variable declaration." {})))))
 
 (defn- parse-type-and-storage-class [specifiers]
-  (let [valid-types #{:int :long :signed :unsigned}
+  (let [valid-types #{:int :long :signed :unsigned :double}
         {types true, storage-classes false} (group-by #(contains? valid-types (:specifier-type %)) specifiers)
         type-specifier (parse-type types)
         storage-class (if (> (count storage-classes) 1)
@@ -519,8 +521,7 @@
 (defn- parse-program [tokens]
   (let [[declarations tokens] (parse-repeatedly tokens parse-declaration :eof)
         _ (expect :eof tokens)
-                                        ;_ (m/coerce #'s/Program declarations)
-        ]
+        _ (m/coerce #'s/Program declarations)]
     declarations))
 
 (defn parse [tokens]

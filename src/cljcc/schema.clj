@@ -48,7 +48,7 @@
 
 (def Const
   [:map
-   [:type [:enum :int :long :uint :ulong]]
+   [:type [:enum :int :long :uint :ulong :double]]
    [:value number?]])
 
 (def ConstantExp
