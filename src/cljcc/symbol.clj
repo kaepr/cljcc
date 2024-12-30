@@ -44,3 +44,7 @@
 (defn ulong-init [v]
   {:type :ulong-init
    :value v})
+
+(defn double-init [v]
+  {:type :double-init
+   :value v})

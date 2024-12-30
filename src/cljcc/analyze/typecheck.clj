@@ -5,6 +5,7 @@
             [cljcc.token :as t]
             [cljcc.schema :as s]
             [cljcc.symbol :as sym]
+            [clojure.core.match :refer [match]]
             [cljcc.analyze.resolve :as r]
             [cljcc.analyze.label-loops :as l]
             [cljcc.exception :as exc]
@@ -32,6 +33,7 @@
     :long (set-type e {:type :long})
     :uint (set-type e {:type :uint})
     :ulong (set-type e {:type :ulong})
+    :double (set-type e {:type :double})
     (exc/analyzer-error "Invalid type for constant expression." {:e e})))
 
 (defmethod typecheck-exp :variable-exp
@@ -48,8 +50,10 @@
     (set-type cast-exp target-type)))
 
 (defmethod typecheck-exp :unary-exp
-  [{:keys [unary-operator value]} ident->symbol]
+  [{:keys [unary-operator value] :as e} ident->symbol]
   (let [typed-inner-e (typecheck-exp value ident->symbol)
+        _ (when (and (= unary-operator :complement) (= {:type :double} (get-type typed-inner-e)))
+            (exc/analyzer-error "Can't take bitwise complement of double" {:expression e}))
         unary-exp (p/unary-exp-node unary-operator typed-inner-e)]
     (condp = unary-operator
       :logical-not (set-type unary-exp {:type :int})
@@ -76,7 +80,7 @@
     (set-type (p/cast-exp-node t e) t)))
 
 (defmethod typecheck-exp :binary-exp
-  [{:keys [left right binary-operator] :as _e} ident->symbol]
+  [{:keys [left right binary-operator] :as e} ident->symbol]
   (let
    [typed-left-e (typecheck-exp left ident->symbol)
     typed-right-e (typecheck-exp right ident->symbol)]
@@ -87,6 +91,10 @@
                {:type :int})
      (let [tl (get-type typed-left-e)
            tr (get-type typed-right-e)
+           _ (when (and (= :remainder binary-operator)
+                        (or (= {:type :double} tl)
+                            (= {:type :double} tr)))
+               (exc/analyzer-error "Operands to remainder operation cannot be double." {:expression e}))
            common-type (get-common-type tl tr)
            convert-left-exp (convert-to-exp typed-left-e common-type)
            convert-right-exp (convert-to-exp typed-right-e common-type)
@@ -269,28 +277,30 @@
       :else (exc/analyzer-error "Non-constant initializer." declaration))))
 
 (defn- const-convert
-  "Converts a constant to target type, performing conversion if necessary.
+  "Converts a constant initializer to a specific variable type.
 
-   Value is already a long, which can hold any valid number."
+  Does type conversion if necessary."
   [{ttype :type :as target-type} {const-type :type value :value :as const}]
-  (let []
-    (if (= ttype const-type)
-      const
-      (condp = ttype
-        :int {:type :int
-              :value (-> value
-                         unchecked-int
-                         long)}
-        :long {:type :long
-               :value value}
-        :uint {:type :uint
-               :value (-> value
-                          unchecked-int
-                          long)}
-        :ulong {:type :ulong
-                :value value}
-        (exc/analyzer-error "Invalid type passed to const-convert function." {:const const
-                                                                              :target-type target-type})))))
+  (match [ttype const-type]
+         [:double :ulong] {:type :double
+                           :value (-> value
+                                      biginteger
+                                      (.doubleValue))}
+         [:double _] {:type :double
+                      :value (double value)}
+         [:ulong :double] {:type :ulong
+                           :value (-> value
+                                      biginteger
+                                      (.longValue))}
+         [(:or :int :uint) _] {:type ttype
+                               :value (-> value
+                                          unchecked-int
+                                          long)}
+         [(:or :long :ulong) _] {:type ttype
+                                 :value (long value)}
+         :else (exc/analyzer-error "Invalid type passed to const-convert function."
+                                   {:const const
+                                    :target-type target-type})))
 
 (defn- zero-initializer
   "Returns zero const initializer based on passed type."
@@ -299,7 +309,8 @@
     :int (sym/int-init 0)
     :uint (sym/uint-init 0)
     :long (sym/long-init 0)
-    :ulong (sym/ulong-init 0)))
+    :ulong (sym/ulong-init 0)
+    :double (sym/double-init (double 0))))
 
 (defn- to-static-init [{:keys [value exp-type] :as e} var-type]
   (cond
@@ -309,7 +320,8 @@
                                    :int (sym/initial-iv (sym/int-init const-value))
                                    :long (sym/initial-iv (sym/long-init const-value))
                                    :uint (sym/initial-iv (sym/uint-init const-value))
-                                   :ulong (sym/initial-iv (sym/ulong-init const-value))))
+                                   :ulong (sym/initial-iv (sym/ulong-init const-value))
+                                   :double (sym/initial-iv (sym/double-init const-value))))
     (nil? e) (sym/initial-iv (zero-initializer var-type))
     :else (exc/analyzer-error "Non-constant initializer on static variable." e)))
 
@@ -482,9 +494,9 @@
   [program]
   (let [v (typecheck-program program)
         program (:program v)
-        m (dissoc (:ident->symbol v) :at-top-level)]
-        ;_ (m/coerce s/Program program)
-        ;_ (m/coerce s/SymbolMap m)
+        m (dissoc (:ident->symbol v) :at-top-level)
+        _ (m/coerce s/Program program)
+        _ (m/coerce s/SymbolMap m)]
         
     {:program program
      :ident->symbol m}))
@@ -505,6 +517,13 @@
       r/resolve-program
       l/label-loops
       typecheck)
+
+  (->
+    "unsigned long ul = 18446744073709549568.;"
+    p/parse-from-src
+    r/resolve-program
+    l/label-loops
+    typecheck)
 
   (pretty/explain
    s/TypecheckedOut

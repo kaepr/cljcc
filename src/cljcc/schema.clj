@@ -316,10 +316,15 @@
    [:type [:= :ulong-init]]
    [:value int?]])
 
+(def DoubleInit
+  [:map
+   [:type [:= :double-init]]
+   [:value double?]])
+
 (def Initial
   [:map
    [:type [:= :initial]]
-   [:static-init [:or IntInit LongInit UIntInit ULongInit]]])
+   [:static-init [:or IntInit LongInit UIntInit ULongInit DoubleInit]]])
 
 (def InitialValue
   [:or
