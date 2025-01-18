@@ -4,6 +4,8 @@ A toy C Compiler implementation in Clojure.
 
 Follows the book [Writing a C Compiler by Nora Sandler](https://nostarch.com/writing-c-compiler).
 
+Post about my experience implementing the book [writing-a-c-compiler-in-clojure](https://shagunagrawal.me/posts/writing-a-c-compiler-in-clojure/).
+
 ## Prerequisites
 
 * [Clojure](https://clojure.org)
