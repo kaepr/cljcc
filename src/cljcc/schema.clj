@@ -399,6 +399,30 @@
    [:src #'TackyVal]
    [:dst #'TackyVal]])
 
+(def TackyDoubleToInt
+  [:map
+   [:type [:= :double-to-int]]
+   [:src #'TackyVal]
+   [:dst #'TackyVal]])
+
+(def TackyDoubleToUInt
+  [:map
+   [:type [:= :double-to-uint]]
+   [:src #'TackyVal]
+   [:dst #'TackyVal]])
+
+(def TackyIntToDouble
+  [:map
+   [:type [:= :int-to-double]]
+   [:src #'TackyVal]
+   [:dst #'TackyVal]])
+
+(def TackyUIntToDouble
+  [:map
+   [:type [:= :uint-to-double]]
+   [:src #'TackyVal]
+   [:dst #'TackyVal]])
+
 (def TackyUnary
   [:map
    [:type [:= :unary]]
