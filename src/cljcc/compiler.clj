@@ -832,10 +832,10 @@
                                 (mapv #(tacky-function->assembly-function % ident->symbol)))
         backend-symbol-table (backend-symbol-table ident->symbol)
         fixed-assembly-functions (mapv #(fix-assembly-function % backend-symbol-table) assembly-functions)
-        program (vec (flatten [assembly-static-variables fixed-assembly-functions]))
+        program (vec (flatten [assembly-static-variables fixed-assembly-functions]))]
         ;_ (m/coerce schema/AssemblyProgram program)
         ;_ (m/coerce schema/BackendSymbolMap backend-symbol-table)
-        ]
+
     {:program program
      :backend-symbol-table backend-symbol-table}))
 

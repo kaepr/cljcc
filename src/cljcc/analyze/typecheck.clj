@@ -84,24 +84,24 @@
   (let
    [typed-left-e (typecheck-exp left ident->symbol)
     typed-right-e (typecheck-exp right ident->symbol)]
-   (if (t/logical? binary-operator)
-     (set-type (p/binary-exp-node typed-left-e
-                                  typed-right-e
-                                  binary-operator)
-               {:type :int})
-     (let [tl (get-type typed-left-e)
-           tr (get-type typed-right-e)
-           _ (when (and (= :remainder binary-operator)
-                        (or (= {:type :double} tl)
-                            (= {:type :double} tr)))
-               (exc/analyzer-error "Operands to remainder operation cannot be double." {:expression e}))
-           common-type (get-common-type tl tr)
-           convert-left-exp (convert-to-exp typed-left-e common-type)
-           convert-right-exp (convert-to-exp typed-right-e common-type)
-           typed-binary-exp (p/binary-exp-node convert-left-exp convert-right-exp binary-operator)]
-       (if (t/arithmetic? binary-operator)
-         (set-type typed-binary-exp common-type)
-         (set-type typed-binary-exp {:type :int}))))))
+    (if (t/logical? binary-operator)
+      (set-type (p/binary-exp-node typed-left-e
+                                   typed-right-e
+                                   binary-operator)
+                {:type :int})
+      (let [tl (get-type typed-left-e)
+            tr (get-type typed-right-e)
+            _ (when (and (= :remainder binary-operator)
+                         (or (= {:type :double} tl)
+                             (= {:type :double} tr)))
+                (exc/analyzer-error "Operands to remainder operation cannot be double." {:expression e}))
+            common-type (get-common-type tl tr)
+            convert-left-exp (convert-to-exp typed-left-e common-type)
+            convert-right-exp (convert-to-exp typed-right-e common-type)
+            typed-binary-exp (p/binary-exp-node convert-left-exp convert-right-exp binary-operator)]
+        (if (t/arithmetic? binary-operator)
+          (set-type typed-binary-exp common-type)
+          (set-type typed-binary-exp {:type :int}))))))
 
 (defmethod typecheck-exp :assignment-exp
   [{:keys [left right assignment-operator] :as _e} ident->symbol]
@@ -111,7 +111,7 @@
     left-type (get-type typed-left)
     converted-right (convert-to-exp typed-right left-type)
     typed-assign-exp (p/assignment-exp-node typed-left converted-right assignment-operator)]
-   (set-type typed-assign-exp left-type)))
+    (set-type typed-assign-exp left-type)))
 
 (defmethod typecheck-exp :conditional-exp
   [{:keys [left right middle] :as _e} m]
@@ -128,21 +128,21 @@
   [{:keys [identifier arguments] :as e} ident->symbol]
   (let
    [{ftype :type :as symbol} (get ident->symbol identifier)]
-   (if (symbol-function? symbol)
-     (let [_ (when (not= (count arguments) (count (:parameter-types ftype)))
-               (exc/analyzer-error "Function called with wrong number of arguments."
-                                   {:expected (count (:parameter-types ftype))
-                                    :actual (count arguments)}))
-           cast-arg-to-param-type-f (fn [param-type arg]
-                                      (convert-to-exp (typecheck-exp arg ident->symbol)
-                                                      param-type))
-           converted-args (mapv cast-arg-to-param-type-f
-                                (:parameter-types ftype)
-                                arguments)
-           typed-fun-call-exp (p/function-call-exp-node identifier converted-args)]
-       (set-type typed-fun-call-exp (:return-type ftype)))
-     (exc/analyzer-error "Variable used as function name" {:symbol symbol
-                                                           :expression e}))))
+    (if (symbol-function? symbol)
+      (let [_ (when (not= (count arguments) (count (:parameter-types ftype)))
+                (exc/analyzer-error "Function called with wrong number of arguments."
+                                    {:expected (count (:parameter-types ftype))
+                                     :actual (count arguments)}))
+            cast-arg-to-param-type-f (fn [param-type arg]
+                                       (convert-to-exp (typecheck-exp arg ident->symbol)
+                                                       param-type))
+            converted-args (mapv cast-arg-to-param-type-f
+                                 (:parameter-types ftype)
+                                 arguments)
+            typed-fun-call-exp (p/function-call-exp-node identifier converted-args)]
+        (set-type typed-fun-call-exp (:return-type ftype)))
+      (exc/analyzer-error "Variable used as function name" {:symbol symbol
+                                                            :expression e}))))
 
 (defmulti typecheck-statement
   "Dispatches based on type of statement.
@@ -282,25 +282,25 @@
   Does type conversion if necessary."
   [{ttype :type :as target-type} {const-type :type value :value :as const}]
   (match [ttype const-type]
-         [:double :ulong] {:type :double
-                           :value (-> value
-                                      biginteger
-                                      (.doubleValue))}
-         [:double _] {:type :double
-                      :value (double value)}
-         [:ulong :double] {:type :ulong
-                           :value (-> value
-                                      biginteger
-                                      (.longValue))}
-         [(:or :int :uint) _] {:type ttype
-                               :value (-> value
-                                          unchecked-int
-                                          long)}
-         [(:or :long :ulong) _] {:type ttype
-                                 :value (long value)}
-         :else (exc/analyzer-error "Invalid type passed to const-convert function."
-                                   {:const const
-                                    :target-type target-type})))
+    [:double :ulong] {:type :double
+                      :value (-> value
+                                 biginteger
+                                 (.doubleValue))}
+    [:double _] {:type :double
+                 :value (double value)}
+    [:ulong :double] {:type :ulong
+                      :value (-> value
+                                 biginteger
+                                 (.longValue))}
+    [(:or :int :uint) _] {:type ttype
+                          :value (-> value
+                                     unchecked-int
+                                     long)}
+    [(:or :long :ulong) _] {:type ttype
+                            :value (long value)}
+    :else (exc/analyzer-error "Invalid type passed to const-convert function."
+                              {:const const
+                               :target-type target-type})))
 
 (defn- zero-initializer
   "Returns zero const initializer based on passed type."
@@ -495,9 +495,9 @@
   (let [v (typecheck-program program)
         program (:program v)
         m (dissoc (:ident->symbol v) :at-top-level)
-        _ (m/coerce s/Program program)
-        _ (m/coerce s/SymbolMap m)]
-        
+        ;_ (m/coerce s/Program program)
+        ;_ (m/coerce s/SymbolMap m)
+        ]
     {:program program
      :ident->symbol m}))
 
@@ -519,11 +519,11 @@
       typecheck)
 
   (->
-    "unsigned long ul = 18446744073709549568.;"
-    p/parse-from-src
-    r/resolve-program
-    l/label-loops
-    typecheck)
+   "unsigned long ul = 18446744073709549568.;"
+   p/parse-from-src
+   r/resolve-program
+   l/label-loops
+   typecheck)
 
   (pretty/explain
    s/TypecheckedOut

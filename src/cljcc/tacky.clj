@@ -124,6 +124,26 @@
    :src src
    :dst dst})
 
+(defn- double-to-int-instruction [src dst]
+  {:type :double-to-int
+   :src src
+   :dst dst})
+
+(defn- double-to-uint-instruction [src dst]
+  {:type :double-to-uint
+   :src src
+   :dst dst})
+
+(defn- int-to-double-instruction [src dst]
+  {:type :int-to-double
+   :src src
+   :dst dst})
+
+(defn- uint-to-double-instruction [src dst]
+  {:type :uint-to-double
+   :src src
+   :dst dst})
+
 (defn- copy-instruction [src dst]
   {:type :copy
    :src src
@@ -196,15 +216,21 @@
           inner-type (tc/get-type typed-inner)
           {res :val
            insts :instructions} value
-          cast-i (cond
-                   (= (u/get-type-size target-type)
-                      (u/get-type-size inner-type)) (copy-instruction res dst)
-                   (< (u/get-type-size target-type)
-                      (u/get-type-size inner-type)) (truncate-instruction res dst)
-                   (u/type-signed? inner-type) (sign-extend-instruction res dst)
-                   :else (zero-extend-instruction res dst))]
+          cast-inst (cond
+                      (u/type-double? target-type) (if (u/type-signed? inner-type)
+                                                     (int-to-double-instruction res dst)
+                                                     (uint-to-double-instruction res dst))
+                      (u/type-double? inner-type) (if (u/type-signed? target-type)
+                                                    (double-to-int-instruction res dst)
+                                                    (double-to-uint-instruction res dst))
+                      (= (u/get-type-size target-type)
+                         (u/get-type-size inner-type)) (copy-instruction res dst)
+                      (< (u/get-type-size target-type)
+                         (u/get-type-size inner-type)) (truncate-instruction res dst)
+                      (u/type-signed? inner-type) (sign-extend-instruction res dst)
+                      :else (zero-extend-instruction res dst))]
       {:val dst
-       :instructions (flatten [insts cast-i])})))
+       :instructions (flatten [insts cast-inst])})))
 
 (defmethod exp-handler :unary-exp
   [exp symbols]
@@ -599,6 +625,8 @@ int foo;
 int foo;
 
 int main(void) {
+    double x = 1000;
+
     for (int i = 0; i < 5; i = i + 1)
         foo = foo + 1;
     return foo;

@@ -149,6 +149,9 @@
     {:type :ulong} 10
     (exc/analyzer-error "Invalid type passed to get-type-size." {:type t})))
 
+(defn type-double? [t]
+  (= {:type :double} t))
+
 (defn type-signed? [t]
   (condp = t
     {:type :int} true
