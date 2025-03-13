@@ -20,10 +20,13 @@ To see all available tasks in the project, run `bb tasks`:
 
 ``` sh
 bb tasks
+
 The following tasks are available:
 
 clean         Removes target folder.
 run-main      Run main
+nrepl         Starts a nrepl session.
+storm         Starts a nrepl session with storm debugger.
 build-uberjar Builds uberjar
 run-uberjar   Run uberjar
 build-native  Builds native image
