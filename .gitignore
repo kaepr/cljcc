@@ -18,6 +18,7 @@
 .settings
 .socket-repl-port
 .sw*
+.DS_Store
 .vscode
 *.class
 *.jar
