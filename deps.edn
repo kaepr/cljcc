@@ -6,7 +6,10 @@
         metosin/malli {:mvn/version "0.16.4"}
         com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}}
  :aliases
- {:run-m {:main-opts ["-m" "cljcc.cljcc"]}
+ {:cli
+  {:extra-paths ["cli/src"]
+   :main-opts ["-m" "cli.cli"]}
+  :run-m {:main-opts ["-m" "cljcc.cljcc"]}
   :build {:deps {io.github.clojure/tools.build
                  {:mvn/version "0.10.3"}}
           :jvm-opts ["-Dclojure.compiler.direct-linking=true"]

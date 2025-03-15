@@ -6,6 +6,17 @@
    [cljcc.driver :as d])
   (:gen-class))
 
+(defn run
+  "Compiles source input using specified compiler options.
+
+  Parameters:
+    source - Source C file.
+    options - Map of compiler configuration options.
+
+  Returns generated AST for specified stage."
+  [source & {:keys [config] :or {config {}}}]
+  (let [default-config {:target {:os :linux}}]))
+
 (set! *warn-on-reflection* true)
 
 (defn usage [options-summary]
@@ -51,17 +62,5 @@
           (exit 1 (ex-message e) e))))))
 
 (comment
-
-  (require '[io.github.humbleui.ui :as ui])
-
-  (ui/defcomp app []
-    [ui/center
-     [ui/label "Hello, world"]])
-
-  (defn -main [& args]
-    (ui/start-app!
-     (ui/window #'app)))
-
-  (-main)
 
   ())

@@ -1,0 +1,4 @@
+{:paths ["src"]
+ :aliases
+ {:run
+  {:main-opts ["-m" "cli.cli"]}}}
