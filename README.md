@@ -23,13 +23,13 @@ bb tasks
 
 The following tasks are available:
 
-clean         Removes target folder.
-run-main      Run main
-nrepl         Starts a nrepl session.
-storm         Starts a nrepl session with storm debugger.
-build-uberjar Builds uberjar
-run-uberjar   Run uberjar
-build-native  Builds native image
+clean            Removes target folder.
+nrepl            Starts a nrepl session.
+storm            Starts a nrepl session with storm debugger.
+cli:run:main     Run's main CLI function.
+cli:build:jar    Builds uberjar for CLI.
+cli:run:jar      Runs CLI jar.
+cli:build:native Builds native image for CLI.
 
 ```
 
@@ -38,19 +38,19 @@ build-native  Builds native image
 To build native image, run:
 
 ``` sh
-bb build-native
+bb cli:build:native
 ```
 
-This produces a binary `cljcc` at `/target/cljcc`. Pass the path to the C file.
+This produces a binary `cljcc-cli` at `/target/cli`. Pass the path to the C file.
 
 ``` sh
-./target/cljcc/cljcc "path/to/file.c"
+./target/cli/cljcc-cli "path/to/file.c"
 ```
 
-## Run 
+## Run Jar
 
 ``` sh
-bb run-main "path/to/file.c"
+bb cli:run:jar
 ```
 
 ## References
