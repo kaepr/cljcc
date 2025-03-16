@@ -9,8 +9,6 @@
    :line 1
    :col 1})
 
-(set! *warn-on-reflection* true)
-
 (defn lex
   ([source]
    (lex source (lexer-ctx)))
@@ -74,7 +72,6 @@
         return 1;
     }
 ")
-
 
   (lex
    "

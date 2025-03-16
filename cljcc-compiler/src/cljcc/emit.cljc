@@ -2,8 +2,9 @@
   (:require
    [cljcc.util :refer [get-os]]
    [cljcc.compiler :as c]
+   [cljcc.core.format :refer [safe-format]]
    [clojure.string :as str]
-   [cljcc.exception :as exc]))
+   [cljcc.core.exception :as exc]))
 
 (defn- handle-label [identifier]
   (condp = (get-os)
@@ -26,13 +27,13 @@
 ;;;; Operand Emit
 
 (defn- imm-opernad-emit [operand _opts]
-  (format "$%d" (:value operand)))
+  (safe-format "$%d" (:value operand)))
 
 (defn- stack-operand-emit [operand _opts]
-  (format "%d(%%rbp)" (:value operand)))
+  (safe-format "%d(%%rbp)" (:value operand)))
 
 (defn- data-operand-emit [operand _opts]
-  (format "%s(%%rip)" (handle-symbol-name (:identifier operand))))
+  (safe-format "%s(%%rip)" (handle-symbol-name (:identifier operand))))
 
 (defn- register-operand [{:keys [register] :as operand} {register-width :register-width :or {register-width :4-byte}}]
   (let [register->width->output {:ax {:8-byte "%rax"
@@ -95,7 +96,7 @@
   ([operand opts]
    (if-let [[_ operand-emit-fn] (find operand-emitters (:operand operand))]
      (operand-emit-fn operand opts)
-     (throw (AssertionError. (str "Invalid operand: " operand))))))
+     (exc/emit-error "Invalid operand" {:operand operand}))))
 
 ;;;; Instruction Emit
 

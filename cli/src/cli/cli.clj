@@ -2,7 +2,7 @@
   (:require
    [clojure.tools.cli :refer [parse-opts]]
    [clojure.string :as string]
-   [cljcc.util :refer [exit]]
+   [cli.core.shell :refer [exit]]
    [cli.driver :as driver])
   (:gen-class))
 

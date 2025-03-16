@@ -6,12 +6,10 @@
    [clojure.set :refer [union]]
    [malli.dev.pretty :as pretty]
    [cljcc.schema :as s]
-   [cljcc.exception :as exc]
+   [cljcc.core.exception :as exc]
    [cljcc.util :as u]))
 
 (declare parse parse-exp parse-statement parse-block expect parse-declaration parse-variable-declaration)
-
-(set! *warn-on-reflection* true)
 
 (def valid-declaration-starts
   (union t/type-specifier-keywords t/storage-specifier-keywords))
@@ -538,7 +536,7 @@
 
   (def file-path "./test-programs/example.c")
 
-  (slurp "./test-programs/example.c")
+  #?(:clj (slurp "./test-programs/example.c"))
 
   (-> file-path
       slurp

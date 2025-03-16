@@ -6,8 +6,6 @@
 
 (def ^:private counter "Global integer counter for generating unique identifier names." (atom 0))
 
-(set! *warn-on-reflection* true)
-
 (defn create-identifier!
   "Returns a unique identifier. Used for generating unique identifier.
 
