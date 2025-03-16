@@ -1,21 +1,8 @@
-(ns cljcc.core.exception
-  (:require [cljcc.core.format :refer [safe-format]]))
-
-(defn try-catch-ex
-  ([f]
-   (try
-     (f)
-     (catch #?(:clj Throwable :cljs :default) e
-       [:error e])))
-  ([f default]
-   (try
-     (f)
-     (catch #?(:clj Throwable :cljs :default) e
-       default))))
+(ns cljcc.core.exception)
 
 (defn lex-error [{line :line col :col :as data}]
   (throw (ex-info
-          (safe-format "Invalid token at line: %s, col: %s." line col)
+          (format "Invalid token at line: %s, col: %s." line col)
           (merge {:error/type :lexer} data))))
 
 (defn parser-error [msg data]

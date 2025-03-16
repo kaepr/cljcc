@@ -4,5 +4,8 @@
         com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}
         cljcc/cljcc {:local/root "../cljcc-compiler"}}
  :aliases
- {:run
-  {:main-opts ["-m" "cli.cli"]}}}
+ {:run {:main-opts ["-m" "cli.cli"]}
+  :build {:deps {io.github.clojure/tools.build
+                 {:mvn/version "0.10.3"}}
+          :jvm-opts ["-Dclojure.compiler.direct-linking=true"]
+          :ns-default build}}}

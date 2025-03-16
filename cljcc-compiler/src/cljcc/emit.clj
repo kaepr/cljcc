@@ -1,24 +1,23 @@
 (ns cljcc.emit
   (:require
-   [cljcc.util :refer [get-os]]
    [cljcc.compiler :as c]
-   [cljcc.core.format :refer [safe-format]]
+   [cljcc.config :as config]
    [clojure.string :as str]
    [cljcc.core.exception :as exc]))
 
 (defn- handle-label [identifier]
-  (condp = (get-os)
+  (condp = (config/get-os)
     :mac (str "L" identifier)
     :linux (str ".L" identifier)
     (throw (ex-info "Error in generating label." {}))))
 
 (defn- handle-symbol-name [name]
-  (if (= :mac (get-os))
+  (if (= :mac (config/get-os))
     (str "_" name)
     name))
 
 (defn- handle-current-translation-unit [name ident->asm-entry]
-  (if (= :mac (get-os))
+  (if (= :mac (config/get-os))
     (handle-symbol-name name)
     (if (get-in ident->asm-entry [name :defined?])
       name
@@ -27,13 +26,13 @@
 ;;;; Operand Emit
 
 (defn- imm-opernad-emit [operand _opts]
-  (safe-format "$%d" (:value operand)))
+  (format "$%d" (:value operand)))
 
 (defn- stack-operand-emit [operand _opts]
-  (safe-format "%d(%%rbp)" (:value operand)))
+  (format "%d(%%rbp)" (:value operand)))
 
 (defn- data-operand-emit [operand _opts]
-  (safe-format "%s(%%rip)" (handle-symbol-name (:identifier operand))))
+  (format "%s(%%rip)" (handle-symbol-name (:identifier operand))))
 
 (defn- register-operand [{:keys [register] :as operand} {register-width :register-width :or {register-width :4-byte}}]
   (let [register->width->output {:ax {:8-byte "%rax"
@@ -290,7 +289,7 @@
 
 (defn emit [{:keys [program backend-symbol-table]}]
   (let [handle-os (fn [ast]
-                    (if (= :linux (get-os))
+                    (if (= :linux (config/get-os))
                       (conj (conj (conj (vec ast) linux-assembly-end) "\n"))
                       ast))]
     (->> program

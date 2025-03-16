@@ -10,7 +10,7 @@
 
 (defn usage [options-summary]
   (->>
-   ["Usage: ./cljcc path/to/file.c [options]"
+   ["Usage: ./cljcc-cli path/to/file.c [options]"
     ""
     "Options:"
     options-summary]

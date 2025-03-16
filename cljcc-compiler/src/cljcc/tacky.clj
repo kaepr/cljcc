@@ -3,7 +3,7 @@
    [cljcc.lexer :as l]
    [cljcc.util :as u]
    [cljcc.parser :as p]
-   [cljcc.exception :as exc]
+   [cljcc.core.exception :as exc]
    [cljcc.symbol :as sym]
    [malli.core :as m]
    [malli.dev.pretty :as pretty]

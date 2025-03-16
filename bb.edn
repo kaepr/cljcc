@@ -10,33 +10,30 @@
   clean {:doc "Removes target folder."
          :task (fs/delete-tree "target")}
 
-  run-main {:doc "Run main"
-            :task (apply clojure "-M -m cljcc.cljcc" *command-line-args*)}
-
   nrepl {:doc "Starts a nrepl session."
          :task (apply clojure "-M:nrepl" *command-line-args*)}
 
   storm {:doc "Starts a nrepl session with storm debugger."
          :task (apply clojure "-M:storm" *command-line-args*)}
 
-  build-uberjar {:doc "Builds uberjar"
-                 :task (when (seq (fs/modified-since "target/cljcc"
-                                                     ["src" "build.clj" "deps.edn" "test" "resources"]))
-                        (clojure "-T:build ci"))}
+  cli:run:main {:doc "Run's main CLI function."
+                :task (apply shell {:dir "cli"} "clojure -M -m cli.cli" *command-line-args*)}
 
-  run-uberjar {:doc "Run uberjar"
-               :depends [build-uberjar]
-               :task (apply shell "java -jar target/cljcc/cljcc.jar" *command-line-args*)}
+  cli:build:jar {:doc "Builds uberjar for CLI."
+                 :task (shell {:dir "cli"} "clojure -T:build ci")}
 
-  build-native {:doc "Builds native image"
-                :depends [build-uberjar]
-                :task
-                    (shell {:dir "target/cljcc"}
+  cli:run:jar {:doc "Runs CLI jar."
+               :depends [cli:build:jar]
+               :task (apply shell "java -jar target/cli/cljcc-cli.jar" *command-line-args*)}
+
+  cli:build:native {:doc "Builds native image for CLI."
+                    :depends [cli:build:jar]
+                    :task
+                    (shell {:dir "target/cli"}
                            "native-image"
-                           "-jar" "cljcc.jar"
-                           "-o" "cljcc"
+                           "-jar" "cljcc-cli.jar"
+                           "-o" "cljcc-cli"
                            "-Ob" ; quick compilation flag for development
-                           ; "-H:Name=cljcc"
                            "-H:+ReportExceptionStackTraces"
                            "--features=clj_easy.graal_build_time.InitClojureClasses"
                            "--initialize-at-build-time"

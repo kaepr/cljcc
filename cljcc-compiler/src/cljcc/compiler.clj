@@ -8,7 +8,7 @@
             [malli.core :as m]
             [malli.dev.pretty :as pretty]
             [cljcc.util :as util]
-            [cljcc.exception :as exc]))
+            [cljcc.core.exception :as exc]))
 
 (def registers #{:ax :dx :di :si :r8 :r9 :r10 :r11 :cx :cl :sp})
 

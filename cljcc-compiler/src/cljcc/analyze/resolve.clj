@@ -1,5 +1,5 @@
 (ns cljcc.analyze.resolve
-  (:require [cljcc.exception :as exc]
+  (:require [cljcc.core.exception :as exc]
             [cljcc.parser :as p]
             [malli.dev.pretty :as pretty]
             [cljcc.schema :as s]

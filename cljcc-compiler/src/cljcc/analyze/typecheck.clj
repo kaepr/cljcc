@@ -8,7 +8,7 @@
             [clojure.core.match :refer [match]]
             [cljcc.analyze.resolve :as r]
             [cljcc.analyze.label-loops :as l]
-            [cljcc.exception :as exc]
+            [cljcc.core.exception :as exc]
             [cljcc.util :as u]))
 
 (declare typecheck-block typecheck-declaration to-static-init)

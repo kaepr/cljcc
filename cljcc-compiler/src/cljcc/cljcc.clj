@@ -3,12 +3,11 @@
    [cljcc.lexer :as lexer]
    [cljcc.parser :as parser]
    [cljcc.tacky :as tacky]
+   [cljcc.config :as config]
    [cljcc.analyze.core :as analyzer]
    [cljcc.compiler :as codegen]
    [cljcc.emit :as emit])
   (:gen-class))
-
-#?(:clj  (set! *warn-on-reflection* true))
 
 (def valid-os-targets #{:mac :linux})
 (def valid-stages #{:lex :parse :validate :tacky :codegen :emit})
@@ -34,6 +33,7 @@
         target-os (:os (:target merged-options))
         _ (assert (stage valid-stages) "Invalid stage for compilation.")
         _ (assert (target-os valid-os-targets) "Invalid operating system.")
+        _ (config/set-os target-os)
         stages [lexer/lex parser/parse
                 analyzer/validate tacky/tacky-generate
                 codegen/assembly emit/emit]

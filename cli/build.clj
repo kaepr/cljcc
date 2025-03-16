@@ -2,14 +2,14 @@
   (:refer-clojure :exclude [test])
   (:require [clojure.tools.build.api :as b]))
 
-(def lib 'net.clojars.cljcc/cljcc)
-(def main 'cljcc.cljcc)
+(def lib 'net.clojars.cljcc-cli/cljcc-cli)
+(def main 'cli.cli)
 (def class-dir "../target/classes")
 
 (defn- uber-opts [opts]
   (assoc opts
          :lib lib :main main
-         :uber-file "../target/cljcc/cljcc.jar"
+         :uber-file "../target/cli/cljcc-cli.jar"
          :basis (b/create-basis {})
          :class-dir class-dir
          :src-dirs ["src"]
@@ -23,5 +23,6 @@
     (println (str "\nCompiling " main "..."))
     (b/compile-clj opts)
     (println "\nBuilding JAR...")
-    (b/uber opts))
+    (b/uber opts)
+    (println "\nJAR built."))
   opts)

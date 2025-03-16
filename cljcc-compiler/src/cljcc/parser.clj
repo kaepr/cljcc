@@ -536,8 +536,6 @@
 
   (def file-path "./test-programs/example.c")
 
-  #?(:clj (slurp "./test-programs/example.c"))
-
   (-> file-path
       slurp
       parse-from-src)

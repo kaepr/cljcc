@@ -1,6 +1,6 @@
 (ns cljcc.analyze.label-loops
   (:require [cljcc.parser :as p]
-            [cljcc.exception :as exc]
+            [cljcc.core.exception :as exc]
             [cljcc.analyze.resolve :as r]
             [cljcc.schema :as s]
             [cljcc.util :as util]

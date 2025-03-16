@@ -1,7 +1,7 @@
 (ns cljcc.lexer
   (:require
    [cljcc.util :refer [newline? whitespace? read-number digit? letter-digit? letter? letter-digit-period?]]
-   [cljcc.exception :as exc]
+   [cljcc.core.exception :as exc]
    [cljcc.token :as t]))
 
 (defn- lexer-ctx []
