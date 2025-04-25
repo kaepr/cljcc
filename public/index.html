@@ -25,11 +25,15 @@
 
         <div class="mb-4">
             <p class="text-gray-700">
-                I have only implemented the first 12 chapters of the book. Refer the supported syntax section below.
+                Post on how I approached implementing the book in Clojure. <a class = "underline text-blue-600 hover:text-blue-800 visited:text-purple-600" href="https://shagunagrawal.me/posts/writing-a-c-compiler-in-clojure/">Writing a C Compiler in Clojure</a>
             </p>
 
             <p class="text-gray-700">
-                Wrote about how I approached implementing this in Clojure. <a class = "underline text-blue-600 hover:text-blue-800 visited:text-purple-600" href="agrawal.me/posts/writing-a-c-compiler-in-clojure/">Writing a C Compiler in Clojure</a>
+                Post on how to compile the clojure codebase to WASM. <a class = "underline text-blue-600 hover:text-blue-800 visited:text-purple-600" href="https://shagunagrawal.me/posts/compiling-clojure-to-wasm-image/">Compiling Clojure to Web Assembly</a>
+            </p>
+
+            <p class="text-gray-700">
+                I have only implemented the first 12 chapters of the book. Refer the supported syntax section below.
             </p>
         </div>
 
@@ -158,6 +162,7 @@ int main(void) {
         });
 
 
+     // https://gist.github.com/designbyadrian/2eb329c853516cef618a
      // Store original console methods
      var originalConsoleLog = console.log;
      var originalConsoleError = console.error;
@@ -204,7 +209,6 @@ int main(void) {
 
 
      async function runCompiler(source, stage) {
-         // https://gist.github.com/designbyadrian/2eb329c853516cef618a
          try {
              const args = [source, "linux", stage];
              const config = new GraalVM.Config();

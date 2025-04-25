@@ -6,6 +6,8 @@ Follows the book [Writing a C Compiler by Nora Sandler](https://nostarch.com/wri
 
 Post about my experience implementing the book [writing-a-c-compiler-in-clojure](https://shagunagrawal.me/posts/writing-a-c-compiler-in-clojure/).
 
+Post on how to compile to WASM [compiling-clojure-to-webassembly](https://shagunagrawal.me/posts/compiling-clojure-to-wasm-image/).
+
 ## Prerequisites
 
 * [Clojure](https://clojure.org)
@@ -20,15 +22,18 @@ To see all available tasks in the project, run `bb tasks`:
 
 ``` sh
 bb tasks
-
 The following tasks are available:
 
 clean            Removes target folder.
 nrepl            Starts a nrepl session.
 storm            Starts a nrepl session with storm debugger.
+lib:run:main     Run's main only for cljcc library.
+lib:build:jar    Builds uberjar only for cljcc lib.
+lib:build:wasm   Builds native WASM image.
 cli:run:main     Run's main CLI function.
 cli:build:jar    Builds uberjar for CLI.
 cli:run:jar      Runs CLI jar.
+cli:build:wasm   Builds native image for WASM.
 cli:build:native Builds native image for CLI.
 
 ```
