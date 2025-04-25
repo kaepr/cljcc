@@ -29,3 +29,4 @@
 /classes
 /target
 .aider*
+public/js/cljcc-lib-wasm.js.wasm

@@ -16,6 +16,23 @@
   storm {:doc "Starts a nrepl session with storm debugger."
          :task (apply clojure "-M:storm" *command-line-args*)}
 
+  lib:run:main {:doc "Run's main only for cljcc library."
+                :task (apply shell {:dir "cljcc-compiler"} "clojure -M -m cljcc.cljcc" *command-line-args*)}
+
+  lib:build:jar {:doc "Builds uberjar only for cljcc lib."
+                 :task (shell {:dir "cljcc-compiler"} "clojure -T:build ci")}
+
+  lib:build:wasm {:doc "Builds native WASM image."
+                  :depends [lib:build:jar]
+                  :task (shell {:dir "target/lib"}
+                               "native-image"
+                               "--tool:svm-wasm"
+                               "-jar" "cljcc-lib.jar"
+                               "-o" "cljcc-lib-wasm"
+                               "--features=clj_easy.graal_build_time.InitClojureClasses"
+                               "--initialize-at-build-time"
+                               "--verbose")}
+
   cli:run:main {:doc "Run's main CLI function."
                 :task (apply shell {:dir "cli"} "clojure -M -m cli.cli" *command-line-args*)}
 
@@ -26,6 +43,18 @@
                :depends [cli:build:jar]
                :task (apply shell "java -jar target/cli/cljcc-cli.jar" *command-line-args*)}
 
+  cli:build:wasm {:doc "Builds native image for WASM."
+                  :depends [cli:build:jar]
+                  :task
+                  (shell {:dir "target/cli"}
+                         "native-image"
+                         "--tool:svm-wasm"
+                         "-jar" "cljcc-cli.jar"
+                         "-o" "cljcc-cli-wasm"
+                         "--features=clj_easy.graal_build_time.InitClojureClasses"
+                         "--initialize-at-build-time"
+                         "--verbose")}
+
   cli:build:native {:doc "Builds native image for CLI."
                     :depends [cli:build:jar]
                     :task
@@ -33,7 +62,7 @@
                            "native-image"
                            "-jar" "cljcc-cli.jar"
                            "-o" "cljcc-cli"
-                           "-Ob" ; quick compilation flag for development
+                           "-Ob"        ; quick compilation flag for development
                            "-H:+ReportExceptionStackTraces"
                            "--features=clj_easy.graal_build_time.InitClojureClasses"
                            "--initialize-at-build-time"

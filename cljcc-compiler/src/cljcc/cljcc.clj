@@ -9,6 +9,8 @@
    [cljcc.emit :as emit])
   (:gen-class))
 
+(set! *warn-on-reflection* true)
+
 (def valid-os-targets #{:mac :linux})
 (def valid-stages #{:lex :parse :validate :tacky :codegen :emit})
 
@@ -47,3 +49,26 @@
         stages-to-run (vec (take stage-idx stages))]
     (reduce (fn [acc f] (f acc)) source stages-to-run)))
 
+(defn- validate-os [os]
+  (let [valid-os #{"mac" "linux"}]
+    (assert (valid-os os) (str "OS: " os "is not valid." "OS type is not valid. Valid os: " (vec valid-os))))
+  os)
+
+(defn- validate-stage [stage]
+  (let [valid-stages #{"lex" "parse" "validate" "tacky" "codegen" "emit"}]
+    (assert (valid-stages stage) (str "Stage is not valid. Valid stages: " (vec valid-stages)))
+    stage))
+
+(defn -main [& args]
+  (let [[source os stage] args
+        source (or source "")
+        os (or os "")
+        stage (or stage "")]
+    (validate-os os)
+    (validate-stage stage)
+    (println (run source {:options {:os (keyword os)
+                                    :stage (keyword stage)}}))))
+
+(comment
+
+  (-main "int main(void) {return 42;}" "linux" "lex"))

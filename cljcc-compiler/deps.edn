@@ -1,4 +1,10 @@
 {:paths ["src"]
  :deps {org.clojure/clojure {:mvn/version "1.11.1"}
         org.clojure/core.match {:mvn/version "1.1.0"}
-        metosin/malli {:mvn/version "0.16.4"}}}
+        com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}
+        metosin/malli {:mvn/version "0.16.4"}}
+ :aliases {:run {:main-opts ["-m" "cljcc.cljcc"]}
+           :build {:deps {io.github.clojure/tools.build
+                          {:mvn/version "0.10.3"}}
+                   :jvm-opts ["-Dclojure.compiler.direct-linking=true"]
+                   :ns-default build}}}

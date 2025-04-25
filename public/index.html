@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>cljcc: C compiler in Clojure</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script type="module" src="js/cljcc-lib-wasm.js"></script>
+</head>
+
+<body class="bg-gray-50 text-gray-800 font-sans">
+    <div class="max-w-6xl mx-auto px-4 py-8">
+        <header class="mb-6">
+            <h1 class="text-2xl font-semibold">cljcc </h1>
+            <p class="text-gray-600 text-sm">C compiler implemented in Clojure.</p>
+        </header>
+
+        <div class="mb-4">
+            <p class="text-gray-700">C compiler implemented in Clojure. Based on <a href="https://nostarch.com/writing-c-compiler" class="underline text-blue-600 hover:text-blue-800 visited:text-purple-600">Writing a C Compiler by Nora Sandler</a> </p>
+            <p class="text-gray-700">
+                Clojure codebase is compiled to WASM using <a href="https://graalvm.github.io/graalvm-demos/native-image/wasm-javac/" class="underline text-blue-600 hover:text-blue-800 visited:text-purple-600">GraalVM native image.</a>
+            </p>
+
+        </div>
+
+        <div class="mb-4">
+            <p class="text-gray-700">
+                I have only implemented the first 12 chapters of the book. Refer the supported syntax section below.
+            </p>
+
+            <p class="text-gray-700">
+                Wrote about how I approached implementing this in Clojure. <a class = "underline text-blue-600 hover:text-blue-800 visited:text-purple-600" href="agrawal.me/posts/writing-a-c-compiler-in-clojure/">Writing a C Compiler in Clojure</a>
+            </p>
+        </div>
+
+        <div class="mb-4">
+                        <p class="text-gray-700">
+                            <a href="https://github.com/kaepr/cljcc" class="underline text-blue-600 hover:text-blue-800 visited:text-purple-600">Github Source: kaepr/cljcc</a>
+                        </p>
+
+        </div>
+
+        <div class="flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4 mb-4">
+            <div class="w-full md:w-1/2">
+                <label for="input" class="block text-sm font-medium mb-1">Input (C code)</label>
+                <textarea id="input" class="w-full h-80 p-3 border border-gray-300 rounded font-mono text-sm" placeholder="Enter your C code here..."></textarea>
+            </div>
+
+            <div class="w-full md:w-1/2">
+                <label for="output" class="block text-sm font-medium mb-1">Output</label>
+                <textarea id="output" class="w-full h-80 p-3 border border-gray-300 bg-gray-50 rounded font-mono text-sm" placeholder="Compiler output will appear here..." readonly></textarea>
+            </div>
+        </div>
+
+         <div class="mb-6">
+            <p class="text-sm font-medium text-gray-700 mb-2">Compilation Stage:</p>
+            <div class="flex flex-wrap gap-4">
+                <label class="inline-flex items-center">
+                    <input type="radio" name="compilationStage" value="lex" class="form-radio text-gray-800">
+                    <span class="ml-2 text-sm">Tokenize</span>
+                </label>
+                <label class="inline-flex items-center">
+                    <input type="radio" name="compilationStage" value="parse" class="form-radio text-gray-800">
+                    <span class="ml-2 text-sm">Parse</span>
+                </label>
+                <label class="inline-flex items-center">
+                    <input type="radio" name="compilationStage" value="validate" class="form-radio text-gray-800">
+                    <span class="ml-2 text-sm">Type Check</span>
+                </label>
+                <label class="inline-flex items-center">
+                    <input type="radio" name="compilationStage" value="tacky" class="form-radio text-gray-800">
+                    <span class="ml-2 text-sm">Tacky IR</span>
+                </label>
+                <label class="inline-flex items-center">
+                    <input type="radio" name="compilationStage" value="codegen" class="form-radio text-gray-800">
+                    <span class="ml-2 text-sm">Codegen</span>
+                </label>
+                <label class="inline-flex items-center">
+                    <input type="radio" name="compilationStage" value="emit" class="form-radio text-gray-800" checked>
+                    <span class="ml-2 text-sm">Generate Assembly</span>
+                </label>
+            </div>
+         </div>
+
+          <div class="mb-6">
+              <button onclick="runSelectedCompilerStage()" class="px-4 py-2 bg-blue-700 text-white rounded hover:bg-blue-600 transition-colors text-sm font-medium">Compile</button>
+          </div>
+
+
+           <!-- Supported Syntax Section -->
+        <div class="mt-12 pt-6 border-t border-gray-200">
+            <h2 class="text-xl font-semibold mb-4">Supported Syntax</h2>
+
+            <div class="space-y-6">
+                <div>
+                    <h3 class="text-md font-medium mb-2">Basic Features</h3>
+                    <pre class="bg-gray-100 p-3 rounded border border-gray-300 text-sm font-mono overflow-auto">
+<code>// Types
+int, long
+
+// Variables
+int x;                  // Local variables
+static long count = 0;   // Static variables
+extern long count2 = 0;  // Extern variables
+
+// Control Flow
+if (x > 0) { ... } else { ... }
+for (int i = 0; i < n; i++) { ... }
+while (condition) { ... }
+do { ... } while (condition);
+
+// Functions
+int main(void);
+int add(int a, int b) { return a + b; }
+
+// Operators
++, -, *, /, %, =, ==, !=, >, <, >=, <=, &&, ||, !</code></pre>
+                </div>
+
+                <div>
+                    <h3 class="text-md font-medium mb-2">Example Code</h3>
+
+                    <pre class="mb-2 bg-gray-100 p-3 rounded border border-gray-300 text-sm font-mono overflow-auto">
+<code>int main(void) {
+  return 42;
+}
+</code></pre>
+
+                    <pre class="mb-2 bg-gray-100 p-3 rounded border border-gray-300 text-sm font-mono overflow-auto">
+<code>int main(void) {
+  static int x = 1;
+  if (x == 42)
+    return x;
+  x = x + 1;
+  return main();
+}</code></pre>
+
+
+                    <pre class="mb-2 bg-gray-100 p-3 rounded border border-gray-300 text-sm font-mono overflow-auto">
+<code>static int x = 20;
+
+int main(void) {
+  int y = 22;
+  return x + y;
+}</code></pre>
+                </div>
+
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // You can call initialization functions from your compiler.js here
+            if (typeof initCompiler === 'function') {
+                initCompiler();
+            }
+
+            document.getElementById('input').value = 'int main(void) {\n  return 0;\n}';
+        });
+
+
+     // Store original console methods
+     var originalConsoleLog = console.log;
+     var originalConsoleError = console.error;
+
+        // Variables to store captured output
+        var capturedLogs = [];
+        var capturedErrors = [];
+
+        // Override console.log
+        console.log = function() {
+            // Capture the arguments
+            var args = Array.from(arguments).map(arg =>
+                typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+            );
+            var message = args.join(' ');
+
+            // Add to our captured logs array
+            capturedLogs.push(message);
+
+            // Call original method
+            originalConsoleLog.apply(console, arguments);
+        };
+
+        // Override console.error
+        console.error = function() {
+            // Capture the arguments
+            var args = Array.from(arguments).map(arg =>
+                typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+            );
+            var message = args.join(' ');
+
+            // Add to our captured errors array
+            capturedErrors.push(message);
+
+            // Call original method
+            originalConsoleError.apply(console, arguments);
+        };
+
+        // Function to clear captured logs
+        function clearCapturedOutput() {
+            capturedLogs = [];
+            capturedErrors = [];
+        }
+
+
+     async function runCompiler(source, stage) {
+         // https://gist.github.com/designbyadrian/2eb329c853516cef618a
+         try {
+             const args = [source, "linux", stage];
+             const config = new GraalVM.Config();
+             await GraalVM.run(args,config).catch(console.error);
+         } catch (e) {
+         }
+     }
+
+     function getCompilationStage() {
+            const radioButtons = document.getElementsByName('compilationStage');
+            for (const radioButton of radioButtons) {
+                if (radioButton.checked) {
+                    return radioButton.value;
+                }
+            }
+
+         return 'emit';
+     }
+
+     async function runSelectedCompilerStage() {
+         clearCapturedOutput();
+         const stage = getCompilationStage();
+         const source = document.getElementById('input').value;
+         const outputElement = document.getElementById('output');
+
+         try {
+             let result = "";
+             await runCompiler(source, stage);
+              let output = "";
+
+
+                // Add console logs if there are any
+                if (capturedLogs.length > 0) {
+                    output += capturedLogs.join("\n");
+                }
+
+                // Add console errors if there are any
+                if (capturedErrors.length > 0) {
+                    output += "Errors:\n" + capturedErrors.join("\n");
+                }
+
+             outputElement.value = output.trim();
+         } catch (error) {
+             let errorOutput = "";
+
+               // Add console logs if there are any
+                if (capturedLogs.length > 0) {
+                    errorOutput += capturedLogs.join("\n");
+                }
+
+                if (capturedErrors.length > 0) {
+                    errorOutput += capturedErrors.join("\n");
+                }
+
+             outputElement.value = errorOutput;
+         }
+     }
+
+    </script>
+</body>
+</html>
