@@ -35,7 +35,6 @@ lib:build:wasm   Builds native WASM image.
 cli:run:main     Run's main CLI function.
 cli:build:jar    Builds uberjar for CLI.
 cli:run:jar      Runs CLI jar.
-cli:build:wasm   Builds native image for WASM.
 cli:build:native Builds native image for CLI.
 
 ```
