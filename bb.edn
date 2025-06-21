@@ -43,18 +43,6 @@
                :depends [cli:build:jar]
                :task (apply shell "java -jar target/cli/cljcc-cli.jar" *command-line-args*)}
 
-  cli:build:wasm {:doc "Builds native image for WASM."
-                  :depends [cli:build:jar]
-                  :task
-                  (shell {:dir "target/cli"}
-                         "native-image"
-                         "--tool:svm-wasm"
-                         "-jar" "cljcc-cli.jar"
-                         "-o" "cljcc-cli-wasm"
-                         "--features=clj_easy.graal_build_time.InitClojureClasses"
-                         "--initialize-at-build-time"
-                         "--verbose")}
-
   cli:build:native {:doc "Builds native image for CLI."
                     :depends [cli:build:jar]
                     :task
