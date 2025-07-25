@@ -520,11 +520,13 @@
 
 ;;;; Assembly AST
 
-(def AssemblyType [:enum :longword :quadword])
+(def AssemblyType [:enum :longword :quadword :double])
 
 (def CondCode [:enum :e :ne :g :ge :l :le :a :ae :b :be])
 
-(def Register [:enum :ax :dx :di :si :r8 :r9 :r10 :r11 :cx :cl :sp])
+(def Register [:enum :ax :dx :di :si :r8 :r9 :r10 :r11 :cx :cl :sp
+               :xmm0 :xmm1 :xmm2 :xmm3 :xmm4 :xmm5 :xmm6 :xmm7
+               :xmm8 :xmm9 :xmm10 :xmm11 :xmm12 :xmm13 :xmm14 :xmm15])
 
 (def AssemblyImmOperand
   [:map
@@ -653,6 +655,18 @@
    [:src #'AssemblyOperand]
    [:dst #'AssemblyOperand]])
 
+(def AssemblyCvttsd2siInstruction
+  [:map
+   [:op [:= :cvttsd2si]]
+   [:src #'AssemblyOperand]
+   [:dst #'AssemblyOperand]])
+
+(def AssemblyCvtsi2sdInstruction
+  [:map
+   [:op [:= :cvtsi2sd]]
+   [:src #'AssemblyOperand]
+   [:dst #'AssemblyOperand]])
+
 (def AssemblyInstruction
   [:multi {:dispatch :op}
    [:mov #'AssemblyMovInstruction]
@@ -663,6 +677,8 @@
    [:cmp #'AssemblyCmpInstruction]
    [:idiv #'AssemblyIdivInstruction]
    [:div #'AssemblyDivInstruction]
+   [:cvttsd2si #'AssemblyCvttsd2siInstruction]
+   [:cvtsi2sd #'AssemblyCvtsi2sdInstruction]
    [:cdq #'AssemblyCdqInstruction]
    [:jmp #'AssemblyJmpInstruction]
    [:jmpcc #'AssemblyJmpCCInstruction]
@@ -671,6 +687,13 @@
    [:push #'AssemblyPushInstruction]
    [:call #'AssemblyCallInstruction]
    [:ret #'AssemblyRetInstruction]])
+
+(def AssemblyStaticConstant
+  [:map
+   [:op [:= :static-constant]]
+   [:identifier string?]
+   [:alignment int?]
+   [:initial #'Initial]])
 
 (def AssemblyStaticVariable
   [:map
@@ -701,7 +724,8 @@
   [:map
    [:type [:= :obj-entry]]
    [:assembly-type #'AssemblyType]
-   [:static? boolean?]])
+   [:static? boolean?]
+   [:constant? {:optional true} boolean?]])
 
 (def FunEntry
   [:map

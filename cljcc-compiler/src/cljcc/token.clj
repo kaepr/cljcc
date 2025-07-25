@@ -86,6 +86,7 @@
   "Binary operands and their precedence."
   {:multiply 100
    :divide 100
+   :divide-double 100
    :remainder 100
 
    :plus 90
@@ -227,7 +228,7 @@
     :literal literal}))
 
 (def tacky-unary-ops
-  #{:bit-not :negate :logical-not})
+  #{:bit-not :negate :logical-not :shr})
 
 (def tacky-binary-ops
   #{:add

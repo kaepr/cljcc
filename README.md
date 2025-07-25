@@ -43,6 +43,8 @@ cli:build:native Builds native image for CLI.
 
 To build native image, run:
 
+( This requires having `native-image` tool installed locally. Use the appropriate JDK distribution. )
+
 ``` sh
 bb cli:build:native
 ```
